@@ -1,0 +1,4 @@
+# 仅供 wrangler dev 本地开发；线上通过 wrangler secret put 设置。
+# 使用 openssl rand -base64 32 生成一次主密钥，后续启动保留相同值。
+PUSHRSS_MASTER_KEY=
+PUSHRSS_ADMIN_PASSWORD=

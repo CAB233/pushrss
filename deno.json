@@ -1,0 +1,62 @@
+{
+  "workspace": [
+    "apps/web",
+    "apps/server",
+    "packages/core",
+    "packages/db",
+    "packages/notifier",
+    "packages/shared",
+    "packages/platform/deno",
+    "packages/platform/cloudflare"
+  ],
+  "nodeModulesDir": "auto",
+  "compilerOptions": {
+    "strict": true,
+    "jsx": "react-jsx",
+    "jsxImportSource": "react",
+    "lib": [
+      "deno.ns",
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ]
+  },
+  "tasks": {
+    "dev": {
+      "dependencies": ["dev:api", "dev:web"]
+    },
+    "dev:api": "deno run --allow-net --allow-read --allow-write --allow-env --env-file=.env packages/platform/deno/main.ts",
+    "dev:web": "deno run -A npm:vite apps/web",
+    "dev:worker": "deno task wrangler dev --local --test-scheduled",
+    "fmt": "deno fmt",
+    "fmt:check": "deno fmt --check",
+    "lint": "deno lint",
+    "check": "deno check apps/web/src/main.tsx apps/server/src/app.ts packages/core/mod.ts packages/db/mod.ts packages/notifier/mod.ts packages/platform/deno/main.ts packages/platform/deno/sqlite.ts packages/platform/deno/scheduler.ts packages/platform/cloudflare/main.ts tests/*.ts scripts/*.ts apps/web/vite.config.ts packages/platform/deno/secrets.ts packages/platform/cloudflare/secrets.ts",
+    "test": "deno test --allow-read=tests,packages/db/migrations,/tmp --allow-write=/tmp",
+    "build:web": "deno run -A npm:vite build apps/web",
+    "build:worker": "deno task wrangler deploy --dry-run --outdir dist/worker",
+    "build": "deno task build:web && deno task build:worker",
+    "verify": "deno task fmt:check && deno task lint && deno task check && deno task test && deno task build",
+    "test:platform": "deno task build:web && deno run -A scripts/platform-smoke.ts",
+    "wrangler": "WRANGLER_LOG_PATH=.wrangler/logs WRANGLER_SEND_METRICS=false deno run -A node_modules/wrangler/wrangler-dist/cli.js",
+    "db:migrate": "deno run --allow-read --allow-write --allow-env --env-file=.env scripts/migrate.ts",
+    "db:backup": "deno run -A --env-file=.env scripts/backup.ts",
+    "test:web": "deno task build:web && deno run -A scripts/web-smoke.ts",
+    "db:migrate:worker": "deno task wrangler d1 migrations apply pushrss --local",
+    "db:migrate:worker:remote": "deno task wrangler d1 migrations apply pushrss --remote"
+  },
+  "fmt": {
+    "exclude": [
+      "deno.lock",
+      "package.json"
+    ]
+  },
+  "exclude": [
+    "node_modules",
+    "dist",
+    "apps/web/dist",
+    ".wrangler",
+    ".agents",
+    "README.md"
+  ]
+}

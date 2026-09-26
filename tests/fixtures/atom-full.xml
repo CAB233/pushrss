@@ -1,0 +1,31 @@
+<feed xmlns="http://www.w3.org/2005/Atom" xml:base="https://example.com/blog/">
+  <title>Atom 示例</title>
+  <author>
+    <name>默认作者</name>
+  </author>
+  <entry xml:base="posts/">
+    <id>001</id>
+    <title type="html">文章 &amp; 标题</title>
+    <link rel="self" href="entry.xml" />
+    <link rel="alternate" href="1" />
+    <content type="html">&lt;p&gt;正文&lt;/p&gt;</content>
+    <summary>摘要</summary>
+    <published>2026-09-25T08:00:00+08:00</published>
+    <updated>2026-09-26T00:00:00Z</updated>
+  </entry>
+  <entry>
+    <id>002</id>
+    <content type="xhtml">
+      <div xmlns="http://www.w3.org/1999/xhtml">
+        <p>内容</p>
+      </div>
+    </content>
+    <author>
+      <name>甲</name>
+    </author>
+    <author>
+      <name>乙</name>
+    </author>
+    <updated>2026-09-25T00:00:00Z</updated>
+  </entry>
+</feed>

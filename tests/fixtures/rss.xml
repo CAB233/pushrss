@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<rss version="2.0">
+  <channel>
+    <title>示例 RSS</title>
+    <item>
+      <guid>rss-1</guid>
+      <title>第一篇文章</title>
+    </item>
+    <item>
+      <guid>rss-2</guid>
+      <title>第二篇文章</title>
+    </item>
+  </channel>
+</rss>

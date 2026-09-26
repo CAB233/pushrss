@@ -1,0 +1,5 @@
+{
+  "name": "@pushrss/web",
+  "version": "0.1.0",
+  "exports": "./src/main.tsx"
+}
