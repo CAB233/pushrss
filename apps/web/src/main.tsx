@@ -34,6 +34,13 @@ import "./style.css";
 type PublicChannel = Omit<Channel, "encryptedConfig">;
 const date = (n: number | null) =>
   n === null ? "暂无记录" : new Date(n).toLocaleString("zh-CN");
+const secondsToMinutes = (seconds: number) =>
+  Math.max(1, Math.round(seconds / 60));
+const minutesToSeconds = (minutes: number, existingSeconds?: number) =>
+  existingSeconds !== undefined &&
+    minutes === secondsToMinutes(existingSeconds)
+    ? existingSeconds
+    : minutes * 60;
 const names = {
   pending: "等待发送",
   sending: "发送中",
@@ -395,8 +402,9 @@ function FeedsPage(props: Props) {
                   </div>
                 </div>
                 <p className="muted">
-                  每 {f.intervalSeconds} 秒 · 上次成功：{date(f.lastFetchedAt)}
-                  {" "}
+                  {f.intervalSeconds % 60 ? "约" : ""}每{" "}
+                  {secondsToMinutes(f.intervalSeconds)}{" "}
+                  分钟 · 上次成功：{date(f.lastFetchedAt)}{" "}
                   · 下次：{f.enabled ? date(f.nextFetchAt) : "已暂停"}
                 </p>
                 {f.lastError && (
@@ -586,7 +594,10 @@ function FeedForm(
         save({
           title: String(d.get("title")),
           url: String(d.get("url")),
-          intervalSeconds: Number(d.get("interval")),
+          intervalSeconds: minutesToSeconds(
+            Number(d.get("interval")),
+            feed?.intervalSeconds,
+          ),
           enabled: d.get("enabled") === "on",
         }, selected);
       }}
@@ -614,15 +625,18 @@ function FeedForm(
           修改地址后保留已有文章与投递记录，清除抓取缓存，并按新地址继续去重。
         </p>
       )}
-      <Field label="抓取周期（秒，60～2592000）">
+      <Field label="抓取周期（分钟，1～43200）">
         <Input
           name="interval"
           type="number"
-          min="60"
-          max="2592000"
+          min="1"
+          max="43200"
+          step="1"
           required
-          defaultValue={feed?.intervalSeconds ??
-            defaults.data?.defaultIntervalSeconds ?? 1800}
+          defaultValue={secondsToMinutes(
+            feed?.intervalSeconds ??
+              defaults.data?.defaultIntervalSeconds ?? 1800,
+          )}
         />
       </Field>
       <label className="check">
@@ -1061,20 +1075,24 @@ function SettingsPage({ api, revision, run, busy }: Props) {
                   e.preventDefault();
                   run(() =>
                     api("/settings", "PATCH", {
-                      defaultIntervalSeconds: Number(
-                        new FormData(e.currentTarget).get("interval"),
+                      defaultIntervalSeconds: minutesToSeconds(
+                        Number(new FormData(e.currentTarget).get("interval")),
+                        settings.data?.defaultIntervalSeconds,
                       ),
                     }), "默认抓取周期已保存");
                 }}
               >
-                <Field label="新订阅源默认周期（秒）">
+                <Field label="新订阅源默认周期（分钟）">
                   <Input
                     name="interval"
                     type="number"
                     required
-                    min="60"
-                    max="2592000"
-                    defaultValue={settings.data.defaultIntervalSeconds}
+                    min="1"
+                    max="43200"
+                    step="1"
+                    defaultValue={secondsToMinutes(
+                      settings.data.defaultIntervalSeconds,
+                    )}
                   />
                 </Field>
                 <p className="muted">

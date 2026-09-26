@@ -143,9 +143,17 @@ try {
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("名称", { exact: true }).fill("浏览器测试源");
   await dialog.getByLabel("RSS / Atom 地址").fill("https://example.test/rss");
-  await dialog.getByLabel("抓取周期").fill("120");
+  await expect(dialog.getByLabel("抓取周期")).toHaveValue("30");
+  await dialog.getByLabel("抓取周期").fill("1.5");
+  await dialog.getByRole("button", { name: "保存订阅源" }).click();
+  await expect(dialog).toHaveCount(1);
+  await dialog.getByLabel("抓取周期").fill("2");
   await dialog.getByRole("button", { name: "保存订阅源" }).click();
   await expect(dialog).toHaveCount(0);
+  await expect(page.getByText("每 2 分钟", { exact: false })).toBeVisible();
+  if ((await repositories.feeds.list())[0].intervalSeconds !== 120) {
+    throw new Error("订阅源分钟换算失败");
+  }
   // 重复资源错误应出现在仍打开的表单中。
   await page.getByRole("button", { name: "添加订阅源" }).click();
   dialog = page.getByRole("dialog");
@@ -154,18 +162,34 @@ try {
   await dialog.getByRole("button", { name: "保存订阅源" }).click();
   await expect(dialog.getByRole("alert")).toContainText("资源重复");
   await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+  const legacyFeed = (await repositories.feeds.list())[0];
+  await repositories.feeds.edit(legacyFeed.id, { intervalSeconds: 90 });
+  await page.getByRole("button", { name: "更新数据" }).click();
+  await expect(page.getByText("约每 2 分钟", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "编辑", exact: true }).click();
   dialog = page.getByRole("dialog");
-  await dialog.getByLabel("抓取周期").fill("300");
+  await expect(dialog.getByLabel("抓取周期")).toHaveValue("2");
+  await dialog.getByRole("button", { name: "保存订阅源" }).click();
+  await expect(dialog).toHaveCount(0);
+  if ((await repositories.feeds.get(legacyFeed.id))?.intervalSeconds !== 90) {
+    throw new Error("编辑其他字段时改变了旧周期");
+  }
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  dialog = page.getByRole("dialog");
+  await expect(dialog.getByLabel("抓取周期")).toHaveValue("2");
+  await dialog.getByLabel("抓取周期").fill("5");
   await dialog.getByLabel("RSS / Atom 地址").fill("https://moved.example/rss");
   await dialog.getByRole("checkbox", { name: "更名渠道", exact: true }).check();
   await dialog.getByRole("button", { name: "保存订阅源" }).click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.getByText("每 300 秒", { exact: false })).toBeVisible();
+  await expect(page.getByText("每 5 分钟", { exact: false })).toBeVisible();
   await expect(page.getByText("https://moved.example/rss", { exact: true }))
     .toBeVisible();
   const editedFeed = (await repositories.feeds.list())[0];
-  if ((await repositories.subscriptions.list(editedFeed.id)).length !== 1) {
+  if (
+    editedFeed.intervalSeconds !== 300 ||
+    (await repositories.subscriptions.list(editedFeed.id)).length !== 1
+  ) {
     throw new Error("编辑表单渠道保存失败");
   }
   await page.getByRole("button", { name: "编辑", exact: true }).click();
@@ -222,9 +246,15 @@ try {
     throw new Error("重试入队失败");
   }
   await nav.getByRole("button", { name: "设置" }).click();
-  await page.getByLabel("新订阅源默认周期").fill("240");
+  await page.getByLabel("新订阅源默认周期").fill("4.5");
+  await page.getByRole("button", { name: "保存设置" }).click();
+  if (await repositories.settings.get("defaultIntervalSeconds") !== undefined) {
+    throw new Error("默认周期接受了小数分钟");
+  }
+  await page.getByLabel("新订阅源默认周期").fill("4");
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(page.getByRole("status")).toContainText("默认抓取周期已保存");
+  await expect(page.getByLabel("新订阅源默认周期")).toHaveValue("4");
   if (await repositories.settings.get("defaultIntervalSeconds") !== 240) {
     throw new Error("设置保存失败");
   }
