@@ -54,6 +54,7 @@ export interface Repositories {
   };
   items: {
     get(id: string): Promise<StoredItem | undefined>;
+    latestForChannel(channelId: string): Promise<StoredItem | undefined>;
     insert(
       value: typeof s.feedItems.$inferInsert,
       expectedUrl?: string,
@@ -222,6 +223,20 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
           eq(s.feedItems.id, id),
         ).limit(1))[0];
       },
+      async latestForChannel(channelId) {
+        const rows = await db.select({ item: s.feedItems }).from(s.feedItems)
+          .innerJoin(
+            s.subscriptions,
+            eq(s.subscriptions.feedId, s.feedItems.feedId),
+          ).where(eq(s.subscriptions.channelId, channelId)).orderBy(
+            desc(
+              sql`coalesce(${s.feedItems.publishedAt}, ${s.feedItems.createdAt})`,
+            ),
+            desc(s.feedItems.createdAt),
+            asc(s.feedItems.id),
+          ).limit(1);
+        return rows[0]?.item;
+      },
       async insert(value, expectedUrl) {
         if (expectedUrl !== undefined) {
           return (await db.insert(s.feedItems).select(
@@ -241,6 +256,9 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
               author: sql<string | null>`${value.author ?? null}`.as("author"),
               publishedAt: sql<number | null>`${value.publishedAt ?? null}`.as(
                 "publishedAt",
+              ),
+              notify: sql<boolean>`${value.notify === false ? 0 : 1}`.as(
+                "notify",
               ),
               createdAt: sql<number>`${value.createdAt}`.as("createdAt"),
             }).from(s.feeds).where(

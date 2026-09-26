@@ -246,7 +246,7 @@ export function createApp(
       throw new ApiError(409, "FEED_DISABLED", "请先启用订阅源");
     }
     await services!.queue.enqueue(
-      { type: "fetch_feed", feedId: feed.id },
+      { type: "fetch_feed", feedId: feed.id, latestOnly: true },
       now(),
     );
     return c.json({ accepted: true }, 202);

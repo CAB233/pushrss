@@ -6,6 +6,7 @@ export interface FetchOptions {
   now?: () => number;
   timeoutMs?: number;
   maxBytes?: number;
+  latestOnly?: boolean;
 }
 export type FetchResult =
   | { status: "skipped" }
@@ -40,7 +41,7 @@ async function readBody(response: Response, maxBytes: number): Promise<string> {
     reader.releaseLock();
   }
 }
-/** lastFetchedAt 表示最近成功抓取；首次抓取也按已有文章去重并推送。Feed 并发领取由平台队列控制。 */
+/** 首次抓取与手动刷新仅通知最新新增文章；其余抓取通知全部新增文章。 */
 export async function fetchFeed(
   repos: Repositories,
   feedId: string,
@@ -103,24 +104,36 @@ export async function fetchFeed(
         throw new FeedError("Feed XML 无效或格式暂未支持");
       }
       const added: StoredItem[] = [];
-      for (const item of parsed.items) {
+      const notificationItems: StoredItem[] = [];
+      const initial = feed.lastFetchedAt === null;
+      const latestOnly = initial || options.latestOnly === true;
+      const items = latestOnly
+        ? parsed.items.toSorted((a, b) =>
+          (b.publishedAt ?? -Infinity) - (a.publishedAt ?? -Infinity)
+        )
+        : parsed.items;
+      for (const item of items) {
+        const notify = !latestOnly || notificationItems.length === 0;
         const saved = await repos.items.insert({
           ...item,
           id: crypto.randomUUID(),
           feedId,
           fingerprint: await fingerprint(item),
+          notify,
           createdAt: now(),
         }, feed.url);
-        if (saved) added.push(saved);
+        if (saved) {
+          added.push(saved);
+          if (notify) notificationItems.push(saved);
+        }
       }
       etag = response.headers.get("etag");
       lastModified = response.headers.get("last-modified");
-      const initial = feed.lastFetchedAt === null;
       result = {
         status: "updated",
         initial,
         added,
-        notificationItems: added,
+        notificationItems,
       };
     }
   } catch (error) {

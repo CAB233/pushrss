@@ -20,10 +20,12 @@ export type DeliveryResult = { ok: true; externalMessageId?: string } | {
   outcome: "rejected" | "unknown";
   retryAfterSeconds?: number;
 };
-export type Job = { type: "fetch_feed"; feedId: string } | {
-  type: "send_notification";
-  deliveryId: string;
-};
+export type Job =
+  | { type: "fetch_feed"; feedId: string; latestOnly?: boolean }
+  | {
+    type: "send_notification";
+    deliveryId: string;
+  };
 /** enqueue 成功意味着平台已持久化任务；消费者按至少一次执行设计。 */
 export interface JobQueue {
   enqueue(job: Job, availableAt?: number): Promise<void>;

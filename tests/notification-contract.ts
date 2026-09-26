@@ -14,7 +14,7 @@ export async function verifyNotifications(r: Repositories) {
     a = crypto.randomUUID(),
     b = crypto.randomUUID();
   const secrets = await createSecretStore(btoa("x".repeat(32)));
-  let time = 1000, calls = 0, mode = "limit";
+  let time = 1000, calls = 0, mode = "limit", lastText = "";
   const queued: { job: Job; at?: number }[] = [];
   const notifiers = createNotifiers({
     fetch: ((_url, init) => {
@@ -29,6 +29,7 @@ export async function verifyNotifications(r: Repositories) {
         return Promise.resolve(Response.json({ code: 0 }));
       }
       const body = JSON.parse(init!.body as string);
+      lastText = body.text;
       equal(body.chat_id, "-123");
       equal(body.message_thread_id, 7);
       equal(body.parse_mode, "HTML");
@@ -126,14 +127,18 @@ export async function verifyNotifications(r: Repositories) {
     equal((await r.deliveries.get(bid))?.externalMessageId, "42");
     equal(await retryDelivery(services, bid), false);
     equal((await testChannel(services, b)).ok, true);
+    equal(lastText.startsWith("【测试】&lt;b&gt;测试&lt;/b&gt;"), true);
     // 新文章验证重试上限和手动重试。
     const item2 = (await r.items.insert({
       id: crypto.randomUUID(),
       feedId: f,
       fingerprint: "b",
       title: "测试",
+      publishedAt: 1790380800000,
       createdAt: 0,
     }))!;
+    equal((await testChannel(services, b)).ok, true);
+    equal(lastText.startsWith("【测试】测试"), true);
     const retryIds = await dispatchItems(services, [item2]);
     const target = (await Promise.all(retryIds.map((id) =>
       r.deliveries.get(id)

@@ -268,7 +268,10 @@ export async function verifyApi(repositories: Repositories) {
   assert(failedTest.status === 502);
   assert((await failedTest.json()).error.message === "通知渠道拒绝请求");
   await ok(`/feeds/${feed.id}/refresh`, "POST", undefined, 202);
-  assert(jobs[0].type === "fetch_feed" && jobs[0].feedId === feed.id);
+  assert(
+    jobs[0].type === "fetch_feed" && jobs[0].feedId === feed.id &&
+      jobs[0].latestOnly === true,
+  );
   let version = 1;
   const fetcher = () =>
     Promise.resolve(

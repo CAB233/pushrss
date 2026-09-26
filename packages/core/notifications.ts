@@ -142,12 +142,16 @@ export async function retryDelivery(
   );
   return true;
 }
-export function testChannel(
+export async function testChannel(
   services: NotificationServices,
   channelId: string,
 ): Promise<DeliveryResult> {
-  return send(services, channelId, {
-    title: "pushrss 测试通知",
-    body: "收到此消息表示通知渠道配置成功。",
-  });
+  const latest = await services.repositories.items.latestForChannel(channelId);
+  const message = latest
+    ? { ...itemMessage(latest), title: `【测试】${latest.title.slice(0, 196)}` }
+    : {
+      title: "PushRSS 测试通知",
+      body: "收到此消息表示通知渠道配置成功。",
+    };
+  return await send(services, channelId, message);
 }

@@ -249,6 +249,25 @@ export async function verifyCloudflare(db: D1Binding) {
       ).raw())[0][0],
       "failed",
     );
+    messages.length = 0;
+    await runtime.queue.enqueue(
+      { type: "fetch_feed", feedId: "manual-probe" },
+      time + 10000,
+    );
+    await runtime.queue.enqueue(
+      { type: "fetch_feed", feedId: "manual-probe", latestOnly: true },
+      time,
+    );
+    const manualRows = await db.prepare(
+      "SELECT payload,available_at FROM jobs WHERE type='fetch_feed' AND json_extract(payload,'$.feedId')='manual-probe' AND status='pending'",
+    ).raw();
+    equal(manualRows.length, 1);
+    equal(JSON.parse(String(manualRows[0][0])).latestOnly, true);
+    equal(manualRows[0][1], time);
+    await db.prepare(
+      "DELETE FROM jobs WHERE type='fetch_feed' AND json_extract(payload,'$.feedId')='manual-probe'",
+    ).run();
+    messages.length = 0;
     time += 31 * 86400000;
     await runtime.queue.recover();
     equal(

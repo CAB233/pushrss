@@ -660,8 +660,8 @@ function FeedForm(
           : <Empty>请先创建通知渠道，再编辑订阅源完成选择。</Empty>}
       </fieldset>
       <p className="muted">
-        首次抓取会推送当前 Feed
-        中的全部新增文章；后续抓取继续去重。勾选的渠道随表单保存生效。
+        首次抓取和手动刷新仅推送最新一篇新增文章；定时抓取会推送全部新增文章。
+        勾选的渠道随表单保存生效。
       </p>
       <Button
         type="submit"
@@ -710,7 +710,11 @@ function ChannelsPage({ api, revision, run, busy }: Props) {
                     disabled={busy || !ch.enabled}
                     variant="outline"
                     onClick={() => {
-                      if (confirm(`向“${ch.name}”发送一条真实测试通知？`)) {
+                      if (
+                        confirm(
+                          `向“${ch.name}”发送一条测试通知？已关联文章时使用最新一篇。`,
+                        )
+                      ) {
                         run(async () => {
                           const result = await api<DeliveryResult>(
                             `/channels/${ch.id}/test`,

@@ -261,8 +261,7 @@ await withServer(
       if (!cron.ok || (await cron.json()).outcome !== "ok") {
         throw new Error("本地 Cron 触发失败");
       }
-      const expected = 2 *
-        (inspectFeed(sampleRss).count + inspectFeed(sampleAtom).count);
+      const expected = feeds.length * channels.length;
       let complete = false;
       for (let attempt = 0; attempt < 100; attempt++) {
         const deliveries = (await api("/deliveries?limit=100")).items.filter((
@@ -278,6 +277,14 @@ await withServer(
         await new Promise((resolve) => setTimeout(resolve, 200));
       }
       if (!complete) throw new Error("真实 Cron / Queues 首次多渠道投递超时");
+      for (const [index, feed] of feeds.entries()) {
+        const expectedItems = inspectFeed(index === 0 ? sampleRss : sampleAtom)
+          .count;
+        if (
+          (await api(`/feeds/${feed.id}/items?limit=100`)).items.length !==
+            expectedItems
+        ) throw new Error("首次抓取文章保存不完整");
+      }
       // 手动刷新同样经过真实 Queues；文章唯一约束保持投递数稳定。
       for (const feed of feeds) await api(`/feeds/${feed.id}/refresh`, "POST");
       await new Promise((resolve) => setTimeout(resolve, 1500));

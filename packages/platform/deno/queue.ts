@@ -34,7 +34,14 @@ export function createQueue(
   }
   const queue: JobQueue = {
     enqueue(job, at = now()) {
-      insert(job, at);
+      transaction(() => {
+        insert(job, at);
+        if (job.type === "fetch_feed" && job.latestOnly) {
+          client.prepare(
+            "UPDATE jobs SET payload=json_set(payload,'$.latestOnly',json('true')),available_at=min(available_at,?),updated_at=? WHERE type='fetch_feed' AND status='pending' AND json_extract(payload,'$.feedId')=?",
+          ).run(at, now(), job.feedId);
+        }
+      });
       return Promise.resolve();
     },
   };

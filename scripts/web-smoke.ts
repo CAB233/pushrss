@@ -15,6 +15,7 @@ for (
     "0001_initial.sql",
     "0002_queue.sql",
     "0003_initial_notifications.sql",
+    "0004_latest_notification.sql",
   ]
 ) {
   migrate(database.client, [{
@@ -258,7 +259,7 @@ try {
   await dialog.getByLabel("解析模式").selectOption("HTML");
   await dialog.getByRole("button", { name: "保存渠道" }).click();
   await expect(dialog).toHaveCount(0);
-  // 新建时先绑定渠道，首次抓取即可消费两篇文章的通知任务。
+  // 新建时先绑定渠道，首次抓取保存两篇文章并通知最新一篇。
   await nav.getByRole("button", { name: "订阅源" }).click();
   await page.getByRole("button", { name: "添加订阅源" }).click();
   dialog = page.getByRole("dialog");
@@ -279,7 +280,7 @@ try {
     fetch: (() =>
       Promise.resolve(
         new Response(
-          "<rss><channel><title>测试</title><item><guid>first-1</guid><title>第一篇</title></item><item><guid>first-2</guid><title>第二篇</title></item></channel></rss>",
+          "<rss><channel><title>测试</title><item><guid>first-1</guid><title>第一篇</title><pubDate>Fri, 25 Sep 2026 00:00:00 GMT</pubDate></item><item><guid>first-2</guid><title>第二篇</title><pubDate>Sat, 26 Sep 2026 00:00:00 GMT</pubDate></item></channel></rss>",
         ),
       )) as typeof fetch,
   };
@@ -293,9 +294,12 @@ try {
   for (const job of [...jobs]) {
     await handleJob(services, job);
   }
+  const firstDeliveries = await repositories.deliveries.list("sent");
   if (
-    testCount !== sentBefore + 2 ||
-    (await repositories.deliveries.list("sent")).length !== 2
+    testCount !== sentBefore + 1 || firstDeliveries.length !== 1 ||
+    (await repositories.items.list(initialFeed.id)).length !== 2 ||
+    (await repositories.items.get(firstDeliveries[0].itemId))?.title !==
+      "第二篇"
   ) throw new Error("首次抓取推送失败");
   jobs.length = 0;
   await handleJob(

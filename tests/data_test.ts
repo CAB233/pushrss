@@ -7,13 +7,11 @@ import {
   verifyRepositories,
   verifySecrets,
 } from "./data-contract.ts";
+import { testMigrations } from "./migrations.ts";
 Deno.test("SQLite 迁移重复执行、约束、仓储、多渠道与级联清理", async () => {
   const c = openDatabase(":memory:");
   try {
-    const migrations = [{
-      name: "0001_initial.sql",
-      sql: await Deno.readTextFile("packages/db/migrations/0001_initial.sql"),
-    }];
+    const migrations = await testMigrations();
     migrate(c.client, migrations);
     migrate(c.client, migrations);
     await verifyRepositories(createRepositories(c.db));

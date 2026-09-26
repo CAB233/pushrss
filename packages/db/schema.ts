@@ -70,6 +70,7 @@ type FeedItemColumns = {
   summary: Text<"summary">;
   author: Text<"author">;
   publishedAt: Num<"published_at">;
+  notify: Defaulted<Required<Bool<"notify">>>;
   createdAt: Created;
 };
 type ChannelColumns = {
@@ -169,6 +170,7 @@ export const feedItems: Table<"feed_items", FeedItemColumns> = sqliteTable(
     summary: text("summary"),
     author: text("author"),
     publishedAt: integer("published_at"),
+    notify: integer("notify", { mode: "boolean" }).notNull().default(true),
     createdAt: created(),
   } satisfies FeedItemColumns,
   (t) => [

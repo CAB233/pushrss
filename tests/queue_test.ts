@@ -4,24 +4,16 @@ import { createQueue } from "../packages/platform/deno/queue.ts";
 import { createRepositories } from "../packages/db/repositories.ts";
 import { createSecretStore } from "../packages/core/secrets.ts";
 import { createRuntime } from "../packages/platform/deno/runtime.ts";
+import { testMigrations } from "./migrations.ts";
 function assert(value: unknown, message = "持久化任务验证失败"): asserts value {
   if (!value) throw new Error(message);
-}
-async function migrations() {
-  return await Promise.all(
-    ["0001_initial.sql", "0002_queue.sql", "0003_initial_notifications.sql"]
-      .map(async (name) => ({
-        name,
-        sql: await Deno.readTextFile("packages/db/migrations/" + name),
-      })),
-  );
 }
 Deno.test("持久队列：双连接领取、延迟、租约恢复、旧执行者隔离、重启及重试上限", async () => {
   const dir = await Deno.makeTempDir({ dir: "/tmp", prefix: "pushrss-queue-" });
   let a = openDatabase(dir + "/test.db");
   let b: ReturnType<typeof openDatabase> | undefined;
   try {
-    migrate(a.client, await migrations());
+    migrate(a.client, await testMigrations());
     let time = 100000;
     let q = createQueue(a.client, () => time);
     b = openDatabase(dir + "/test.db");
@@ -71,6 +63,14 @@ Deno.test("持久队列：双连接领取、延迟、租约恢复、旧执行者
     assert(
       a.client.prepare("SELECT status FROM jobs").get()?.status === "failed",
     );
+    await q.enqueue({ type: "fetch_feed", feedId: "manual" }, time + 10000);
+    await q.enqueue(
+      { type: "fetch_feed", feedId: "manual", latestOnly: true },
+      time,
+    );
+    const manual = q.claim();
+    assert(manual?.job.type === "fetch_feed" && manual.job.latestOnly);
+    q.finish(manual);
     time += 31 * 86400000;
     q.recover();
     assert(!a.client.prepare("SELECT id FROM jobs").get());
@@ -83,7 +83,7 @@ Deno.test("持久队列：双连接领取、延迟、租约恢复、旧执行者
 Deno.test("持久化抓取投递：首次推送、崩溃补偿、限流续投、启停、周期及失败隔离", async () => {
   const c = openDatabase(":memory:");
   try {
-    migrate(c.client, await migrations());
+    migrate(c.client, await testMigrations());
     let time = 1000;
     const now = () => time;
     const q = createQueue(c.client, now);

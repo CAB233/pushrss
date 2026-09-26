@@ -76,7 +76,8 @@ export async function verifyFeeds(
     const first = await run();
     if (first.status !== "updated") throw new Error("首次抓取失败");
     equal(first.added.length, 4);
-    equal(first.notificationItems.length, 4);
+    equal(first.notificationItems.length, 1);
+    equal(first.notificationItems[0].title, "标题 & 测试");
     equal(first.initial, true);
     equal(headers.has("if-none-match"), false);
     equal((await repos.feeds.get(id))?.title, "自定义标题");
@@ -116,7 +117,37 @@ export async function verifyFeeds(
     const second = await fetchFeed(repos, other, { fetch: mock, now });
     if (second.status !== "updated") throw new Error("第二个 Feed 失败");
     equal(second.added.length, 2);
+    equal(second.notificationItems.length, 1);
     equal(second.initial, true);
+    response = () =>
+      new Response(
+        `<rss version="2.0"><channel><title>测试</title>
+        <item><guid>older</guid><title>较早</title><pubDate>Fri, 25 Sep 2026 00:00:00 GMT</pubDate></item>
+        <item><guid>newer</guid><title>最新</title><pubDate>Sat, 26 Sep 2026 00:00:00 GMT</pubDate></item>
+        </channel></rss>`,
+      );
+    const manual = await fetchFeed(repos, other, {
+      fetch: mock,
+      now,
+      latestOnly: true,
+    });
+    if (manual.status !== "updated") throw new Error("手动刷新失败");
+    equal(manual.added.length, 2);
+    equal(manual.notificationItems.map((item) => item.title), ["最新"]);
+    response = () =>
+      new Response(
+        `<rss version="2.0"><channel><title>测试</title>
+        <item><guid>newer</guid><title>最新</title><pubDate>Sat, 26 Sep 2026 00:00:00 GMT</pubDate></item>
+        <item><guid>middle</guid><title>中间</title><pubDate>Fri, 25 Sep 2026 12:00:00 GMT</pubDate></item>
+        <item><guid>earliest</guid><title>更早</title><pubDate>Thu, 24 Sep 2026 00:00:00 GMT</pubDate></item>
+        </channel></rss>`,
+      );
+    const scheduled = await fetchFeed(repos, other, { fetch: mock, now });
+    if (scheduled.status !== "updated") throw new Error("定时抓取失败");
+    equal(scheduled.notificationItems.map((item) => item.title), [
+      "中间",
+      "更早",
+    ]);
     equal(
       (await fetchFeed(repos, id, { fetch: mock, now, maxBytes: 10 })).status,
       "failed",
