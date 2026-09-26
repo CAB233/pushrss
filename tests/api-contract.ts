@@ -247,6 +247,26 @@ export async function verifyApi(repositories: Repositories) {
   assert((await ok(`/subscriptions?feedId=${feed.id}`)).items.length === 1);
   await ok(`/channels/${channel.id}`, "PATCH", { enabled: true });
   assert((await ok(`/channels/${channel.id}/test`, "POST")).ok);
+  const failedTest = await createApp("deno", {
+    ...services,
+    notifiers: {
+      ...services.notifiers,
+      telegram: {
+        send: () =>
+          Promise.resolve({
+            ok: false as const,
+            error: "通知渠道拒绝请求",
+            retryable: false,
+            outcome: "rejected" as const,
+          }),
+      },
+    },
+  }).request(`/api/channels/${channel.id}/test`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${services.adminPassword}` },
+  });
+  assert(failedTest.status === 502);
+  assert((await failedTest.json()).error.message === "通知渠道拒绝请求");
   await ok(`/feeds/${feed.id}/refresh`, "POST", undefined, 202);
   assert(jobs[0].type === "fetch_feed" && jobs[0].feedId === feed.id);
   let version = 1;

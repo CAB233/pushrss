@@ -318,7 +318,11 @@ export function createApp(
   });
   app.post("/api/channels/:id/test", async (c) => {
     required(await r!.channels.get(c.req.param("id")));
-    return c.json(await testChannel(services!, c.req.param("id")));
+    const result = await testChannel(services!, c.req.param("id"));
+    if (!result.ok) {
+      throw new ApiError(502, "NOTIFICATION_FAILED", result.error);
+    }
+    return c.json(result);
   });
   app.get("/api/subscriptions", async (c) => {
     const [limit, offset] = pagination(c);

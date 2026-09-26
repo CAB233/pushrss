@@ -42,6 +42,7 @@ export async function verifyNotifierProtocol() {
   for (const parseMode of [undefined, "HTML", "MarkdownV2"] as const) {
     const n = createNotifiers({
       fetch: ((_url, init) => {
+        equal(new Request(_url, init).redirect, "manual");
         const payload = JSON.parse(init!.body as string);
         equal(payload.parse_mode, parseMode);
         equal(payload.link_preview_options.is_disabled, false);
@@ -79,4 +80,42 @@ export async function verifyNotifierProtocol() {
   if (result.ok) throw new Error("预期超时");
   equal(result.outcome, "unknown");
   equal(result.retryable, false);
+  equal(result.error, "通知请求超时，发送结果未知");
+
+  const redirect = createNotifiers({
+    fetch: ((_url, init) => {
+      equal(init?.redirect, "manual");
+      return Promise.resolve(
+        new Response(null, {
+          status: 302,
+          headers: { Location: "https://example.com/redirect" },
+        }),
+      );
+    }) as typeof fetch,
+  });
+  const redirected = await redirect.telegram.send(config, message);
+  if (redirected.ok) throw new Error("预期重定向失败");
+  equal(redirected.error, "通知服务返回重定向（HTTP 302），发送结果未知");
+  equal(redirected.outcome, "unknown");
+
+  const originalError = console.error;
+  const logs: unknown[][] = [];
+  console.error = (...args: unknown[]) => logs.push(args);
+  try {
+    const broken = createNotifiers({
+      fetch: (() =>
+        Promise.reject(
+          new TypeError("https://api.telegram.org/bot1:test/sendMessage", {
+            cause: { code: "ECONNRESET" },
+          }),
+        )) as typeof fetch,
+    });
+    const failed = await broken.telegram.send(config, message);
+    if (failed.ok) throw new Error("预期连接失败");
+    equal(failed.error, "通知连接失败，发送结果未知");
+    equal(JSON.stringify(logs).includes("1:test"), false);
+    equal(JSON.stringify(logs).includes("ECONNRESET"), true);
+  } finally {
+    console.error = originalError;
+  }
 }

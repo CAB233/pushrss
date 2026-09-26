@@ -117,6 +117,20 @@ try {
   await page.getByRole("button", { name: "发送测试通知" }).click();
   await expect(page.getByRole("status")).toContainText("测试通知已发送");
   if (testCount !== 1) throw new Error("测试通知调用次数错误");
+  await page.route(
+    "**/api/channels/*/test",
+    (route) =>
+      route.fulfill({
+        status: 502,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "NOTIFICATION_FAILED", message: "模拟渠道拒绝请求" },
+        }),
+      }),
+    { times: 1 },
+  );
+  await page.getByRole("button", { name: "发送测试通知" }).click();
+  await expect(page.getByRole("alert")).toContainText("模拟渠道拒绝请求");
   await page.getByRole("button", { name: "编辑渠道" }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("渠道名称").fill("更名渠道");

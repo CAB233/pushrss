@@ -56,6 +56,20 @@ export function failure(
 ): DeliveryResult {
   return { ok: false, error, retryable, outcome, retryAfterSeconds };
 }
+function diagnostic(error: unknown): { name: string; code?: string } {
+  if (!(error instanceof Error)) return { name: "unknown" };
+  const name = ["TypeError", "AbortError", "Error"].includes(error.name)
+    ? error.name
+    : "other";
+  const cause = object(error.cause);
+  const code = cause.code;
+  return {
+    name,
+    code: typeof code === "string" && /^[A-Z][A-Z0-9_]{1,31}$/.test(code)
+      ? code
+      : undefined,
+  };
+}
 /** 上游错误正文可能包含凭据，统一转换为固定诊断。 */
 export function createNotifiers(
   options: { fetch?: typeof fetch; timeoutMs?: number } = {},
@@ -114,11 +128,18 @@ export function createNotifiers(
     try {
       const response = await request(url, {
         method: "POST",
-        redirect: "error",
+        redirect: "manual",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
         signal: abort.signal,
       });
+      if (response.status >= 300 && response.status < 400) {
+        return failure(
+          `通知服务返回重定向（HTTP ${response.status}），发送结果未知`,
+          false,
+          "unknown",
+        );
+      }
       let data: Record<string, unknown> = {};
       try {
         data = object(await response.json());
@@ -153,8 +174,18 @@ export function createNotifiers(
         (type === "telegram" && data.ok === false)
       ) return failure("通知渠道拒绝请求");
       return failure("通知响应无效，发送结果未知", false, "unknown");
-    } catch {
-      return failure("通知连接中断或超时，发送结果未知", false, "unknown");
+    } catch (error) {
+      const timedOut = abort.signal.aborted;
+      console.error("通知出站请求失败", {
+        channel: type,
+        category: timedOut ? "timeout" : "connection",
+        ...diagnostic(error),
+      });
+      return failure(
+        timedOut ? "通知请求超时，发送结果未知" : "通知连接失败，发送结果未知",
+        false,
+        "unknown",
+      );
     } finally {
       clearTimeout(timer);
     }

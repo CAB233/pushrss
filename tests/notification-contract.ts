@@ -19,7 +19,8 @@ export async function verifyNotifications(r: Repositories) {
   const notifiers = createNotifiers({
     fetch: ((_url, init) => {
       calls++;
-      equal(init?.redirect, "error");
+      equal(init?.redirect, "manual");
+      equal(new Request(_url, init).redirect, "manual");
       if (String(_url).includes("ft07")) {
         equal(String(_url), "https://123.push.ft07.com/send/sctp123tabc.send");
         const body = JSON.parse(init!.body as string);
