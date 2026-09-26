@@ -5,6 +5,12 @@ export type Feed = typeof s.feeds.$inferSelect;
 export type Channel = typeof s.notificationChannels.$inferSelect;
 export type StoredItem = typeof s.feedItems.$inferSelect;
 export type Delivery = typeof s.deliveries.$inferSelect;
+export type DeliverySummary = Delivery & {
+  itemTitle: string;
+  feedTitle: string;
+  feedUrl: string;
+  channelName: string;
+};
 export interface Overview {
   feeds: number;
   articlesToday: number;
@@ -87,6 +93,11 @@ export interface Repositories {
     channelsForFeed(feedId: string): Promise<Channel[]>;
   };
   deliveries: {
+    listWithContext(
+      status?: Delivery["status"],
+      limit?: number,
+      offset?: number,
+    ): Promise<DeliverySummary[]>;
     list(
       status?: Delivery["status"],
       limit?: number,
@@ -361,6 +372,33 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
       },
     },
     deliveries: {
+      async listWithContext(status, limit, offset) {
+        const p = page(limit, offset);
+        const rows = await db.select({
+          delivery: s.deliveries,
+          itemTitle: sql<string>`${s.feedItems.title}`.as(
+            "delivery_item_title",
+          ),
+          feedTitle: sql<string>`${s.feeds.title}`.as("delivery_feed_title"),
+          feedUrl: sql<string>`${s.feeds.url}`.as("delivery_feed_url"),
+          channelName: sql<string>`${s.notificationChannels.name}`.as(
+            "delivery_channel_name",
+          ),
+        }).from(s.deliveries)
+          .innerJoin(s.feedItems, eq(s.deliveries.itemId, s.feedItems.id))
+          .innerJoin(s.feeds, eq(s.feedItems.feedId, s.feeds.id))
+          .innerJoin(
+            s.notificationChannels,
+            eq(s.deliveries.channelId, s.notificationChannels.id),
+          )
+          .where(status ? eq(s.deliveries.status, status) : undefined)
+          .orderBy(desc(s.deliveries.createdAt), asc(s.deliveries.id))
+          .limit(p.limit).offset(p.offset);
+        return rows.map(({ delivery, ...context }) => ({
+          ...delivery,
+          ...context,
+        }));
+      },
       async list(status, limit, offset) {
         const p = page(limit, offset);
         return await db.select().from(s.deliveries).where(

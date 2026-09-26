@@ -13,6 +13,7 @@ import { createRoot } from "react-dom/client";
 import type {
   Channel,
   Delivery,
+  DeliverySummary,
   Feed,
   Overview,
   StoredItem,
@@ -961,7 +962,7 @@ function DeliveriesPage(props: Props) {
   const [offset, setOffset] = useState(0),
     [status, setStatus] = useState(""),
     [detail, setDetail] = useState<string>();
-  const state = useData<Page<Delivery>>(
+  const state = useData<Page<DeliverySummary>>(
     api,
     `/deliveries?limit=20&offset=${offset}${status ? `&status=${status}` : ""}`,
     revision,
@@ -988,7 +989,12 @@ function DeliveriesPage(props: Props) {
             {state.data?.items.map((d) => (
               <div className="row section-head" key={d.id}>
                 <div>
-                  <h3>
+                  <h3>{d.itemTitle}</h3>
+                  <p className="muted">
+                    订阅源：{d.feedTitle || d.feedUrl}{" "}
+                    · 通知渠道：{d.channelName}
+                  </p>
+                  <p>
                     <Badge
                       variant={d.status === "failed"
                         ? "destructive"
@@ -997,7 +1003,7 @@ function DeliveriesPage(props: Props) {
                       {names[d.status]}
                     </Badge>{" "}
                     · 本轮尝试 {d.attempts} 次
-                  </h3>
+                  </p>
                   <p className="muted">{date(d.createdAt)}</p>
                   {d.lastError && <p className="error">{d.lastError}</p>}
                 </div>

@@ -314,10 +314,23 @@ export async function verifyApi(repositories: Repositories) {
   );
   assert(summary.recentFeeds.some((f: { id: string }) => f.id === feed.id));
 
+  const sentDelivery = (await ok("/deliveries?status=sent")).items.find(
+    (v: { id: string }) => v.id === deliveryId,
+  );
   assert(
-    (await ok("/deliveries?status=sent")).items.some((v: { id: string }) =>
-      v.id === deliveryId
-    ),
+    sentDelivery?.itemTitle === "文章 2" &&
+      sentDelivery.feedTitle === "API 测试" &&
+      sentDelivery.feedUrl === "https://another.example/" &&
+      sentDelivery.channelName === "更名",
+    JSON.stringify(sentDelivery),
+  );
+  await repositories.feeds.edit(feed.id, { title: "" });
+  const unnamedDelivery = (await ok("/deliveries?status=sent")).items.find(
+    (v: { id: string }) => v.id === deliveryId,
+  );
+  assert(
+    unnamedDelivery?.feedTitle === "" &&
+      unnamedDelivery.feedUrl === "https://another.example/",
   );
   assert((await req(`/deliveries/${deliveryId}/retry`, "POST")).status === 409);
   await repositories.deliveries.update(deliveryId, { status: "failed" });

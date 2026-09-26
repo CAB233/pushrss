@@ -231,8 +231,14 @@ try {
     createdAt: now,
     updatedAt: now,
   });
+  await repositories.feeds.edit(feed.id, { title: "" });
   await nav.getByRole("button", { name: "投递记录" }).click();
   await page.getByLabel("投递状态").selectOption("failed");
+  await expect(page.getByRole("heading", { name: "安全文章" })).toBeVisible();
+  await expect(
+    page.getByText("订阅源：https://moved.example/rss · 通知渠道：更名渠道"),
+  )
+    .toBeVisible();
   await page.getByRole("button", { name: "查看详情" }).click();
   dialog = page.getByRole("dialog");
   await expect(dialog).toContainText("更名渠道");

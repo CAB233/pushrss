@@ -365,7 +365,7 @@ export function createApp(
       !["pending", "sending", "sent", "failed"].includes(status)
     ) invalid();
     return c.json({
-      items: await r!.deliveries.list(
+      items: await r!.deliveries.listWithContext(
         status as "pending" | "sending" | "sent" | "failed" | undefined,
         limit,
         offset,
