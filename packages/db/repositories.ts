@@ -16,6 +16,11 @@ export interface Overview {
 export interface Repositories {
   overview(start: number, end: number): Promise<Overview>;
   feeds: {
+    fillTitleIfBlank(
+      id: string,
+      title: string,
+      expectedUrl: string,
+    ): Promise<void>;
     edit(
       id: string,
       value: Partial<
@@ -152,6 +157,13 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
       };
     },
     feeds: {
+      async fillTitleIfBlank(id, title, expectedUrl) {
+        await db.update(s.feeds).set({ title }).where(and(
+          eq(s.feeds.id, id),
+          eq(s.feeds.url, expectedUrl),
+          sql`trim(${s.feeds.title}) = ''`,
+        ));
+      },
       async edit(id, value) {
         return (await db.update(s.feeds).set({
           ...value,

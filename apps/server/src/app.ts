@@ -41,6 +41,9 @@ function cookieOptions(url: string) {
       !["localhost", "127.0.0.1", "[::1]"].includes(parsed.hostname),
   };
 }
+function feedTitle(value: unknown): string {
+  return typeof value === "string" && !value.trim() ? "" : string(value);
+}
 async function validAuthorization(
   supplied: string,
   password: string,
@@ -186,7 +189,7 @@ export function createApp(
       await r!.feeds.save({
         id: crypto.randomUUID(),
         url: feedUrl(b.url),
-        title: b.title === undefined ? "" : string(b.title),
+        title: b.title === undefined ? "" : feedTitle(b.title),
         enabled: b.enabled === undefined ? true : boolean(b.enabled),
         intervalSeconds: interval(
           b.intervalSeconds ?? (await settings()).defaultIntervalSeconds,
@@ -212,7 +215,7 @@ export function createApp(
       required(
         await r!.feeds.edit(id, {
           url,
-          title: b.title === undefined ? old.title : string(b.title),
+          title: b.title === undefined ? old.title : feedTitle(b.title),
           enabled: b.enabled === undefined ? old.enabled : boolean(b.enabled),
           intervalSeconds: b.intervalSeconds === undefined
             ? old.intervalSeconds

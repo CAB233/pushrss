@@ -263,7 +263,6 @@ try {
   await nav.getByRole("button", { name: "订阅源" }).click();
   await page.getByRole("button", { name: "添加订阅源" }).click();
   dialog = page.getByRole("dialog");
-  await dialog.getByLabel("名称", { exact: true }).fill("首次推送测试");
   await dialog.getByLabel("RSS / Atom 地址").fill(
     "https://initial.example/rss",
   );
@@ -274,6 +273,7 @@ try {
   const initialFeed = (await repositories.feeds.list())[0];
   if (
     !initialFeed.enabled ||
+    initialFeed.title !== "" ||
     (await repositories.subscriptions.list(initialFeed.id)).length !== 1
   ) throw new Error("首次抓取前的渠道配置错误");
   const initialOptions = {
@@ -297,6 +297,7 @@ try {
   const firstDeliveries = await repositories.deliveries.list("sent");
   if (
     testCount !== sentBefore + 1 || firstDeliveries.length !== 1 ||
+    (await repositories.feeds.get(initialFeed.id))?.title !== "测试" ||
     (await repositories.items.list(initialFeed.id)).length !== 2 ||
     (await repositories.items.get(firstDeliveries[0].itemId))?.title !==
       "第二篇"

@@ -201,6 +201,21 @@ export async function verifyApi(repositories: Repositories) {
     title: "API 测试",
   }, 201);
   assert(feed.intervalSeconds === 120);
+  const unnamedFeed = await ok("/feeds", "POST", {
+    url: "https://api-test.example/unnamed",
+    title: "   ",
+    enabled: false,
+  }, 201);
+  assert(unnamedFeed.title === "");
+  const renamed = await ok(`/feeds/${unnamedFeed.id}`, "PATCH", {
+    title: "手动名称",
+  });
+  assert(renamed.title === "手动名称");
+  const cleared = await ok(`/feeds/${unnamedFeed.id}`, "PATCH", {
+    title: " ",
+  });
+  assert(cleared.title === "");
+  await ok(`/feeds/${unnamedFeed.id}`, "DELETE", undefined, 204);
   assert((await req("/feeds", "POST", { url: feed.url })).status === 409);
   await ok(`/feeds/${feed.id}`, "PATCH", {
     enabled: false,

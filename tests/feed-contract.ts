@@ -47,11 +47,11 @@ export async function verifyFeeds(
   const other = crypto.randomUUID();
   let time = 1000;
   const now = () => time;
-  const create = (id: string) =>
+  const create = (id: string, title = "自定义标题") =>
     repos.feeds.save({
       id,
       url: `https://example.com/${id}`,
-      title: "自定义标题",
+      title,
       intervalSeconds: 60,
       nextFetchAt: 0,
       createdAt: 0,
@@ -71,7 +71,7 @@ export async function verifyFeeds(
   };
   const run = () => fetchFeed(repos, id, { fetch: mock, now });
   await create(id);
-  await create(other);
+  await create(other, "");
   try {
     const first = await run();
     if (first.status !== "updated") throw new Error("首次抓取失败");
@@ -96,6 +96,7 @@ export async function verifyFeeds(
       (await fetchFeed(repos, other, { fetch: mock, now })).status,
       "failed",
     );
+    equal((await repos.feeds.get(other))?.title, "");
     for (const status of [404, 429, 500]) {
       response = () => new Response("私密响应内容", { status });
       equal(await run(), {
@@ -119,6 +120,7 @@ export async function verifyFeeds(
     equal(second.added.length, 2);
     equal(second.notificationItems.length, 1);
     equal(second.initial, true);
+    equal((await repos.feeds.get(other))?.title, b.title);
     response = () =>
       new Response(
         `<rss version="2.0"><channel><title>测试</title>
@@ -134,6 +136,7 @@ export async function verifyFeeds(
     if (manual.status !== "updated") throw new Error("手动刷新失败");
     equal(manual.added.length, 2);
     equal(manual.notificationItems.map((item) => item.title), ["最新"]);
+    equal((await repos.feeds.get(other))?.title, b.title);
     response = () =>
       new Response(
         `<rss version="2.0"><channel><title>测试</title>

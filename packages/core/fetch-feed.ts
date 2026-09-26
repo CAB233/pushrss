@@ -103,6 +103,13 @@ export async function fetchFeed(
       } catch {
         throw new FeedError("Feed XML 无效或格式暂未支持");
       }
+      if (parsed.title && !feed.title.trim()) {
+        await repos.feeds.fillTitleIfBlank(
+          feedId,
+          parsed.title.slice(0, 500),
+          feed.url,
+        );
+      }
       const added: StoredItem[] = [];
       const notificationItems: StoredItem[] = [];
       const initial = feed.lastFetchedAt === null;

@@ -594,11 +594,13 @@ function FeedForm(
       <Field label="名称">
         <Input
           name="title"
-          required
           defaultValue={feed?.title}
-          maxLength={2000}
+          maxLength={500}
         />
       </Field>
+      <p className="muted">
+        名称留空时，下一次成功抓取会使用 RSS / Atom 中的标题。
+      </p>
       <Field label="RSS / Atom 地址">
         <Input
           name="url"
