@@ -12,3 +12,5 @@ wrangler.jsonc
 
 *.md
 !README.md
+
+.agents/

@@ -1,7 +1,7 @@
 import { handleJob } from "../packages/core/jobs.ts";
 import type { ApiServices } from "../apps/server/src/app.ts";
 /** 真实浏览器 + Hono / SQLite；Feed 与通知服务使用固定数据。 */
-import { chromium, expect } from "@playwright/test";
+import { chromium, expect, type Page as BrowserPage } from "@playwright/test";
 import { openDatabase } from "../packages/platform/deno/sqlite.ts";
 import { migrate } from "../packages/platform/deno/migrate.ts";
 import { createRepositories } from "../packages/db/repositories.ts";
@@ -9,6 +9,24 @@ import { createSecretStore } from "../packages/core/secrets.ts";
 import { sessionSigningSecret } from "../packages/shared/auth.ts";
 import { createApp } from "../apps/server/src/app.ts";
 import type { Job } from "../packages/shared/contracts.ts";
+async function navigate(page: BrowserPage, name: string) {
+  const mobile = (page.viewportSize()?.width ?? 1360) < 768;
+  if (mobile) await page.locator('[data-slot="sidebar-trigger"]').click();
+  await page.getByRole("navigation").getByRole("button", { name, exact: true })
+    .click();
+  if (mobile) await expect(page.locator('[data-mobile="true"]')).toHaveCount(0);
+}
+async function selectLanguage(
+  page: BrowserPage,
+  label: string,
+  option: string,
+) {
+  await page.getByRole("button", { name: label, exact: true }).click();
+  await page.getByRole("menuitemradio", { name: option, exact: true }).click();
+  await expect(page.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(
+    0,
+  );
+}
 const database = openDatabase(":memory:");
 for (
   const name of [
@@ -66,7 +84,8 @@ const server = Deno.serve(
       );
     }
     if (
-      path !== "/" && !/^\/assets\/[a-zA-Z0-9_.-]+$/.test(path)
+      path !== "/" && path !== "/pushrss-icon-v1.svg" &&
+      !/^\/assets\/[a-zA-Z0-9_.-]+$/.test(path)
     ) return new Response("Not found", { status: 404 });
     try {
       const file = await Deno.readFile(
@@ -81,6 +100,8 @@ const server = Deno.serve(
             ? "application/javascript"
             : path.endsWith(".css")
             ? "text/css"
+            : path.endsWith(".svg")
+            ? "image/svg+xml"
             : "text/html",
         },
       });
@@ -108,8 +129,78 @@ try {
   await page.getByRole("button", { name: "进入控制台" }).click();
   await expect(page.getByRole("heading", { name: "概览", exact: true }))
     .toBeVisible();
-  const nav = page.getByRole("navigation");
-  await nav.getByRole("button", { name: "通知渠道" }).click();
+  await page.emulateMedia({ colorScheme: "light" });
+  await page.getByRole("button", { name: "主题", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "深色", exact: true }).click();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.reload();
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByRole("button", { name: "主题", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "浅色", exact: true }).click();
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  await page.getByRole("button", { name: "主题", exact: true }).click();
+  await page.getByRole("menuitemradio", { name: "跟随系统", exact: true })
+    .click();
+  await page.emulateMedia({ colorScheme: "dark" });
+  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).not.toHaveClass(/dark/);
+  console.log("主题切换、刷新持久化与系统主题跟随通过");
+  await expect(page.getByRole("heading", { name: "运行信息" })).toBeVisible();
+  const logo = page.locator('[data-slot="sidebar-header"] img');
+  await expect(logo).toHaveAttribute(
+    "src",
+    await page.locator('link[rel="icon"]').getAttribute("href") ?? "",
+  );
+  await expect.poll(() =>
+    logo.evaluate((element: HTMLImageElement) => element.naturalWidth)
+  ).toBeGreaterThan(0);
+  const sidebar = page.locator('[data-slot="sidebar"][data-state]');
+  await expect(sidebar).toHaveAttribute("data-state", "expanded");
+  await page.locator('[data-slot="sidebar-trigger"]').click();
+  await expect(sidebar).toHaveAttribute("data-state", "collapsed");
+  await expect.poll(async () => {
+    const logoBox = await logo.boundingBox();
+    const iconBox = await page.getByRole("navigation").getByRole("button", {
+      name: "概览",
+      exact: true,
+    }).locator("svg").boundingBox();
+    if (!logoBox || !iconBox) return Infinity;
+    return Math.abs(
+      logoBox.x + logoBox.width / 2 - iconBox.x - iconBox.width / 2,
+    );
+  }).toBeLessThan(1);
+  const languageButton = page.getByRole("button", {
+    name: "页面语言",
+    exact: true,
+  });
+  const updateButton = page.getByRole("button", {
+    name: "更新数据",
+    exact: true,
+  });
+  const [languageBox, updateBox] = await Promise.all([
+    languageButton.boundingBox(),
+    updateButton.boundingBox(),
+  ]);
+  if (!languageBox || !updateBox || languageBox.x >= updateBox.x) {
+    throw new Error("页面语言按钮位置错误");
+  }
+  await selectLanguage(page, "页面语言", "English");
+  await expect(page.getByRole("heading", { name: "Runtime information" }))
+    .toBeVisible();
+  await selectLanguage(page, "Page language", "简体中文");
+  await page.screenshot({
+    path: "/tmp/pushrss-sidebar-collapsed.png",
+    fullPage: true,
+  });
+  await navigate(page, "设置");
+  await expect(page.getByRole("heading", { name: "设置", exact: true }))
+    .toBeVisible();
+  await expect(page.getByRole("heading", { name: "运行信息" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "页面语言" })).toBeVisible();
+  await page.keyboard.press("Control+b");
+  await expect(sidebar).toHaveAttribute("data-state", "expanded");
+  await navigate(page, "通知渠道");
   await page.getByRole("button", { name: "添加通知渠道" }).click();
   let dialog = page.getByRole("dialog");
   await dialog.getByLabel("渠道名称").fill("浏览器测试渠道");
@@ -139,7 +230,7 @@ try {
   await expect(dialog.getByLabel("替换完整渠道配置")).not.toBeChecked();
   await dialog.getByRole("button", { name: "保存渠道" }).click();
   await expect(dialog).toHaveCount(0);
-  await nav.getByRole("button", { name: "订阅源" }).click();
+  await navigate(page, "订阅源");
   await page.getByRole("button", { name: "添加订阅源" }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("名称", { exact: true }).fill("浏览器测试源");
@@ -205,11 +296,16 @@ try {
   await page.getByRole("button", { name: "立即刷新" }).click();
   await expect(page.getByRole("status")).toContainText("刷新已入队");
   if (jobs[0]?.type !== "fetch_feed") throw new Error("刷新入队失败");
-  await page.getByRole("button", { name: "文章与渠道" }).click();
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
   dialog = page.getByRole("dialog");
-  await dialog.getByRole("button", { name: "关联", exact: true }).click();
-  await expect(dialog.getByRole("button", { name: "解除关联" })).toBeVisible();
-  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
+  await expect(dialog.getByRole("textbox", { name: "名称", exact: true }))
+    .toHaveAttribute(
+      "placeholder",
+      "名称留空时，下一次成功抓取会使用 RSS / Atom 中的标题",
+    );
+  await dialog.getByRole("checkbox", { name: "更名渠道", exact: true }).check();
+  await dialog.getByRole("button", { name: "保存订阅源" }).click();
+  await expect(dialog).toHaveCount(0);
   const [feed] = await repositories.feeds.list();
   const [channel] = await repositories.channels.list();
   const now = Date.now();
@@ -233,7 +329,7 @@ try {
     updatedAt: now,
   });
   await repositories.feeds.edit(feed.id, { title: "" });
-  await nav.getByRole("button", { name: "投递记录" }).click();
+  await navigate(page, "投递记录");
   await page.getByLabel("投递状态").selectOption("failed");
   await expect(page.getByRole("heading", { name: "安全文章" })).toBeVisible();
   await expect(
@@ -252,7 +348,7 @@ try {
   if (jobs.at(-1)?.type !== "send_notification") {
     throw new Error("重试入队失败");
   }
-  await nav.getByRole("button", { name: "设置" }).click();
+  await navigate(page, "设置");
   await page.getByLabel("添加订阅源时的默认周期").fill("4.5");
   await page.getByRole("button", { name: "保存设置" }).click();
   if (await repositories.settings.get("defaultIntervalSeconds") !== undefined) {
@@ -266,8 +362,19 @@ try {
     throw new Error("设置保存失败");
   }
   await page.setViewportSize({ width: 390, height: 844 });
+  await selectLanguage(page, "页面语言", "English");
+  await page.locator('[data-slot="sidebar-trigger"]').click();
+  await expect(page.getByRole("dialog", { name: "Main navigation" }))
+    .toBeVisible();
+  await page.screenshot({
+    path: "/tmp/pushrss-sidebar-mobile.png",
+    fullPage: true,
+  });
+  await page.keyboard.press("Escape");
+  await expect(page.locator('[data-mobile="true"]')).toHaveCount(0);
+  await selectLanguage(page, "Page language", "简体中文");
   for (const name of ["概览", "订阅源", "通知渠道", "投递记录", "设置"]) {
-    await nav.getByRole("button", { name }).click();
+    await navigate(page, name);
     await expect(page.getByRole("heading", { name, exact: true }))
       .toBeVisible();
     if (
@@ -276,13 +383,13 @@ try {
       )
     ) throw new Error(`${name} 窄屏溢出`);
   }
-  await nav.getByRole("button", { name: "订阅源" }).click();
+  await navigate(page, "订阅源");
   await page.getByRole("button", { name: "暂停", exact: true }).click();
   await expect(page.getByRole("button", { name: "立即刷新" })).toBeDisabled();
   await page.getByRole("button", { name: "删除", exact: true }).click();
   await expect(page.getByText("添加第一个订阅源，开始收集新文章。"))
     .toBeVisible();
-  await nav.getByRole("button", { name: "通知渠道" }).click();
+  await navigate(page, "通知渠道");
   await page.getByRole("button", { name: "删除", exact: true }).click();
   await expect(page.getByText("添加通知渠道，再前往订阅源详情完成关联。"))
     .toBeVisible();
@@ -297,7 +404,7 @@ try {
   await dialog.getByRole("button", { name: "保存渠道" }).click();
   await expect(dialog).toHaveCount(0);
   // 新建时先绑定渠道，首次抓取保存两篇文章并通知最新一篇。
-  await nav.getByRole("button", { name: "订阅源" }).click();
+  await navigate(page, "订阅源");
   await page.getByRole("button", { name: "添加订阅源" }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("RSS / Atom 地址").fill(
@@ -349,7 +456,7 @@ try {
   await page.getByRole("button", { name: "删除", exact: true }).click();
   await expect(page.getByText("添加第一个订阅源，开始收集新文章。"))
     .toBeVisible();
-  await nav.getByRole("button", { name: "通知渠道" }).click();
+  await navigate(page, "通知渠道");
   // 真实仓储分页与前端错误恢复。
   for (let i = 0; i < 21; i++) {
     await repositories.feeds.save({
@@ -372,7 +479,7 @@ try {
       }),
     { times: 1 },
   );
-  await nav.getByRole("button", { name: "订阅源" }).click();
+  await navigate(page, "订阅源");
   await expect(page.getByRole("alert")).toContainText("模拟暂时不可用");
   await page.getByRole("button", { name: "更新数据" }).click();
   await expect(page.getByRole("heading", { name: "分页订阅 0", exact: false }))
@@ -381,7 +488,7 @@ try {
   await expect(page.getByRole("heading", { name: "分页订阅 20", exact: false }))
     .toBeVisible();
   await expect(page.getByRole("button", { name: "下一页" })).toBeDisabled();
-  await nav.getByRole("button", { name: "概览" }).click();
+  await navigate(page, "概览");
   await expect(page.locator(".stats strong").first()).toHaveText("21");
   await page.screenshot({ path: "/tmp/pushrss-m6-mobile.png", fullPage: true });
   await page.setViewportSize({ width: 1360, height: 900 });
@@ -411,25 +518,25 @@ try {
   await english.getByRole("button", { name: "Open dashboard" }).click();
   await expect(english.getByRole("heading", { name: "Overview", exact: true }))
     .toBeVisible();
-  const englishNav = english.getByRole("navigation");
   for (
     const name of ["Feeds", "Notification channels", "Deliveries", "Settings"]
   ) {
-    await englishNav.getByRole("button", { name, exact: true }).click();
+    await navigate(english, name);
     await expect(english.getByRole("heading", { name, exact: true }))
       .toBeVisible();
   }
-  await english.getByLabel("Page language").selectOption("zh-CN");
+  await selectLanguage(english, "Page language", "简体中文");
   await expect(english.getByRole("heading", { name: "设置", exact: true }))
     .toBeVisible();
   await expect(english.locator("html")).toHaveAttribute("lang", "zh-CN");
   await english.reload();
   await expect(english.getByRole("heading", { name: "概览", exact: true }))
     .toBeVisible();
-  await english.getByRole("navigation").getByRole("button", { name: "设置" })
-    .click();
-  await expect(english.getByLabel("页面语言")).toHaveValue("zh-CN");
-  await english.getByLabel("页面语言").selectOption("system");
+  await navigate(english, "设置");
+  await english.getByRole("button", { name: "页面语言", exact: true }).click();
+  await expect(english.getByRole("menuitemradio", { name: "简体中文" }))
+    .toHaveAttribute("aria-checked", "true");
+  await english.getByRole("menuitemradio", { name: "跟随浏览器" }).click();
   await expect(english.getByRole("heading", { name: "Settings", exact: true }))
     .toBeVisible();
   await english.evaluate(() => {
@@ -441,7 +548,7 @@ try {
   });
   await expect(english.getByRole("heading", { name: "设置", exact: true }))
     .toBeVisible();
-  await english.getByLabel("页面语言").selectOption("en");
+  await selectLanguage(english, "页面语言", "English");
   await english.evaluate(() =>
     globalThis.dispatchEvent(new Event("languagechange"))
   );
@@ -473,7 +580,7 @@ try {
   await fallback.close();
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "中英文语言检测、切换、持久化、回退、窄屏及中文界面登录、刷新保持会话、退出、配置、关联、模拟测试通知、文章安全展示、投递重试、设置、删除及窄屏验证通过",
+    "shadcn 侧边栏折叠、键盘、移动导航、组件表单、中英文语言检测、切换、持久化、回退、窄屏及中文界面登录、刷新保持会话、退出、配置、关联、模拟测试通知、文章安全展示、投递重试、设置、删除及窄屏验证通过",
   );
 } finally {
   await browser.close();

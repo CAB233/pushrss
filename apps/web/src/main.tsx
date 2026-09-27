@@ -1,3 +1,22 @@
+import { AppSidebar, pages } from "./components/app-sidebar.tsx";
+import { PageHeaderActions } from "./components/page-header-actions.tsx";
+import {
+  SidebarInset,
+  SidebarProvider,
+  SidebarTrigger,
+} from "./components/ui/sidebar.tsx";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "./components/ui/dialog.tsx";
+import { Label } from "./components/ui/label.tsx";
+import { Checkbox } from "./components/ui/checkbox.tsx";
+import {
+  NativeSelect,
+  NativeSelectOption,
+} from "./components/ui/native-select.tsx";
 import { I18nextProvider, useTranslation } from "react-i18next";
 import {
   getLanguagePreference,
@@ -8,7 +27,6 @@ import {
 } from "./i18n.ts";
 import {
   createContext,
-  Fragment,
   type ReactNode,
   useCallback,
   useContext,
@@ -61,10 +79,10 @@ const names = {
 };
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
-    <label className="field">
+    <Label className="field">
       <span>{label}</span>
       {children}
-    </label>
+    </Label>
   );
 }
 function Empty({ children }: { children?: ReactNode }) {
@@ -146,33 +164,46 @@ function Modal(
 ) {
   const { t } = useTranslation();
   const feedback = useContext(Feedback);
-  const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
-    const dialog = ref.current!;
-    dialog.showModal();
-    return () => dialog.close();
-  }, []);
+  const opener = useRef(
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  );
   return (
-    <dialog
-      ref={ref}
-      onCancel={(e) => {
-        e.preventDefault();
-        if (!feedback.busy) close();
+    <Dialog
+      open
+      onOpenChange={(open) => {
+        if (!open && !feedback.busy) close();
       }}
-      aria-label={title}
     >
-      <div className="section-head">
-        <h2>{title}</h2>
-        <Button variant="outline" disabled={feedback.busy} onClick={close}>
-          {t("common.close")}
-        </Button>
-      </div>
-      {feedback.error && <p role="alert" className="error">{feedback.error}</p>}
-      {feedback.message && (
-        <p role="status" className="success">{feedback.message}</p>
-      )}
-      {children}
-    </dialog>
+      <DialogContent
+        className="max-h-[88vh] overflow-y-auto"
+        showCloseButton={false}
+        aria-describedby={undefined}
+        onInteractOutside={(event) => event.preventDefault()}
+        onEscapeKeyDown={(event) => {
+          if (feedback.busy) event.preventDefault();
+        }}
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          opener.current?.focus();
+        }}
+      >
+        <DialogHeader className="flex-row items-center justify-between text-left">
+          <DialogTitle>{title}</DialogTitle>
+          <Button variant="outline" disabled={feedback.busy} onClick={close}>
+            {t("common.close")}
+          </Button>
+        </DialogHeader>
+        {feedback.error && (
+          <p role="alert" className="error">{feedback.error}</p>
+        )}
+        {feedback.message && (
+          <p role="status" className="success">{feedback.message}</p>
+        )}
+        {children}
+      </DialogContent>
+    </Dialog>
   );
 }
 type Run = (work: () => Promise<unknown>, message: string) => Promise<boolean>;
@@ -253,104 +284,29 @@ function Article({ item }: { item: StoredItem }) {
     </article>
   );
 }
-function FeedDetail(
-  { feed, api, revision, run, busy }: Props & { feed: Feed },
-) {
+function FeedArticles({ feed, api, revision }: Props & { feed: Feed }) {
   const { t } = useTranslation();
-  const [offset, setOffset] = useState(0),
-    [channelOffset, setChannelOffset] = useState(0);
+  const [offset, setOffset] = useState(0);
   const items = useData<Page<StoredItem>>(
     api,
     `/feeds/${feed.id}/items?limit=20&offset=${offset}`,
     revision,
   );
-  const channels = useData<Page<PublicChannel>>(
-    api,
-    `/channels?limit=20&offset=${channelOffset}`,
-    revision,
-  );
-  // 关联查询取全量，避免超过一页的关联误判。
-  const [selected, setSelected] = useState<string[]>([]),
-    [subError, setSubError] = useState(""),
-    [subLoading, setSubLoading] = useState(true);
-  useEffect(() => {
-    const abort = new AbortController();
-    setSubError("");
-    setSelected([]);
-    setSubLoading(true);
-    (async () => {
-      const ids: string[] = [];
-      for (let offset = 0;; offset += 100) {
-        const p = await api<Page<{ channelId: string }>>(
-          `/subscriptions?feedId=${feed.id}&limit=100&offset=${offset}`,
-          "GET",
-          undefined,
-          abort.signal,
-        );
-        ids.push(...p.items.map((i) => i.channelId));
-        if (p.items.length < 100) break;
-      }
-      if (!abort.signal.aborted) setSelected(ids);
-    })().catch((e) => {
-      if (!abort.signal.aborted) setSubError(e.message);
-    }).finally(() => {
-      if (!abort.signal.aborted) setSubLoading(false);
-    });
-    return () => abort.abort();
-  }, [api, feed.id, revision]);
   return (
-    <>
-      <h3>{t("feeds.linkedChannels")}</h3>
-      <Result state={channels}>
-        {subError
-          ? <p role="alert">{subError}</p>
-          : channels.data?.items.map((ch) => (
-            <div className="row section-head" key={ch.id}>
-              <span>
-                {ch.name} ·{" "}
-                {ch.enabled ? t("common.enabled") : t("common.inactive")}
-              </span>
-              <Button
-                disabled={busy || subLoading || !!subError}
-                variant="outline"
-                onClick={() =>
-                  run(() =>
-                    selected.includes(ch.id)
-                      ? api(`/subscriptions/${feed.id}/${ch.id}`, "DELETE")
-                      : api("/subscriptions", "POST", {
-                        feedId: feed.id,
-                        channelId: ch.id,
-                      }), t("feeds.linksUpdated"))}
-              >
-                {selected.includes(ch.id) ? t("feeds.unlink") : t("feeds.link")}
-              </Button>
-            </div>
-          ))}
-        {!channels.data?.items.length && (
-          <Empty>{t("feeds.createChannel")}</Empty>
-        )}
-        <Pager
-          offset={channelOffset}
-          count={channels.data?.items.length ?? 0}
-          set={setChannelOffset}
-        />
-      </Result>
-      <h3>{t("feeds.articles")}</h3>
-      <Result state={items}>
-        {items.data?.items.map((item) => (
-          <details key={item.id}>
-            <summary>{item.title}</summary>
-            <Article item={item} />
-          </details>
-        ))}
-        {!items.data?.items.length && <Empty>{t("feeds.articlesEmpty")}</Empty>}
-        <Pager
-          offset={offset}
-          count={items.data?.items.length ?? 0}
-          set={setOffset}
-        />
-      </Result>
-    </>
+    <Result state={items}>
+      {items.data?.items.map((item) => (
+        <details key={item.id}>
+          <summary>{item.title}</summary>
+          <Article item={item} />
+        </details>
+      ))}
+      {!items.data?.items.length && <Empty>{t("feeds.articlesEmpty")}</Empty>}
+      <Pager
+        offset={offset}
+        count={items.data?.items.length ?? 0}
+        set={setOffset}
+      />
+    </Result>
   );
 }
 async function allItems<T>(
@@ -410,8 +366,11 @@ function FeedsPage(props: Props) {
                     <p className="url">{f.url}</p>
                   </div>
                   <div className="actions">
-                    <Button variant="outline" onClick={() => setDetail(f)}>
-                      {t("feeds.detailsAction")}
+                    <Button
+                      variant="outline"
+                      onClick={() => setDetail(f)}
+                    >
+                      {t("feeds.articlesAction")}
                     </Button>
                     <Button variant="outline" onClick={() => setEditing(f)}>
                       {t("common.edit")}
@@ -545,10 +504,10 @@ function FeedsPage(props: Props) {
       )}
       {detail && (
         <Modal
-          title={detail.title || t("feeds.details")}
+          title={t("feeds.articles")}
           close={() => setDetail(null)}
         >
-          <FeedDetail {...props} feed={detail} />
+          <FeedArticles {...props} feed={detail} />
         </Modal>
       )}
     </>
@@ -633,13 +592,11 @@ function FeedForm(
       <Field label={t("feeds.name")}>
         <Input
           name="title"
+          placeholder={t("feeds.nameHelp")}
           defaultValue={feed?.title}
           maxLength={500}
         />
       </Field>
-      <p className="muted">
-        {t("feeds.nameHelp")}
-      </p>
       <Field label={t("feeds.url")}>
         <Input
           name="url"
@@ -648,11 +605,6 @@ function FeedForm(
           defaultValue={feed?.url}
         />
       </Field>
-      {feed && (
-        <p className="muted">
-          {t("feeds.urlHelp")}
-        </p>
-      )}
       <Field label={t("feeds.interval")}>
         <Input
           name="interval"
@@ -667,14 +619,13 @@ function FeedForm(
           )}
         />
       </Field>
-      <label className="check">
-        <input
-          type="checkbox"
+      <Label className="check">
+        <Checkbox
           name="enabled"
           defaultChecked={feed?.enabled ?? true}
         />
         {t("feeds.enable")}
-      </label>
+      </Label>
       <fieldset disabled={busy || channelsLoading}>
         <legend className="mb-2 font-medium">{t("nav.channels")}</legend>
         {channelsLoading
@@ -687,26 +638,22 @@ function FeedForm(
           )
           : channels.length
           ? channels.map((channel) => (
-            <label className="check" key={channel.id}>
-              <input
-                type="checkbox"
+            <Label className="check" key={channel.id}>
+              <Checkbox
                 checked={selected.includes(channel.id)}
-                onChange={(e) =>
+                onCheckedChange={(checked) =>
                   setSelected((ids) =>
-                    e.target.checked
+                    checked === true
                       ? [...ids, channel.id]
                       : ids.filter((id) => id !== channel.id)
                   )}
               />
               {channel.name}
               {channel.enabled ? "" : t("common.pausedSuffix")}
-            </label>
+            </Label>
           ))
           : <Empty>{t("feeds.selectChannelsHelp")}</Empty>}
       </fieldset>
-      <p className="muted">
-        {t("feeds.policy")}
-      </p>
       <Button
         type="submit"
         disabled={busy || channelsLoading || !!channelError ||
@@ -858,24 +805,27 @@ function ChannelForm(
         <Input name="name" required defaultValue={channel?.name} />
       </Field>
       <Field label={t("channels.type")}>
-        <select
+        <NativeSelect
           value={type}
           disabled={!!channel}
           onChange={(e) => setType(e.target.value as PublicChannel["type"])}
         >
-          <option value="serverchan">{t("channels.serverchan")}</option>
-          <option value="telegram">{t("channels.telegram")}</option>
-        </select>
+          <NativeSelectOption value="serverchan">
+            {t("channels.serverchan")}
+          </NativeSelectOption>
+          <NativeSelectOption value="telegram">
+            {t("channels.telegram")}
+          </NativeSelectOption>
+        </NativeSelect>
       </Field>
       {channel && (
-        <label className="check">
-          <input
-            type="checkbox"
+        <Label className="check">
+          <Checkbox
             checked={replace}
-            onChange={(e) => setReplace(e.target.checked)}
+            onCheckedChange={(checked) => setReplace(checked === true)}
           />
           {t("channels.replace")}
-        </label>
+        </Label>
       )}
       {channel && (
         <p className="muted">
@@ -918,30 +868,34 @@ function ChannelForm(
               <Input name="threadId" type="number" min="1" />
             </Field>
             <Field label={t("channels.parseMode")}>
-              <select name="parseMode">
-                <option value="">{t("channels.plainText")}</option>
-                <option value="HTML">{t("channels.html")}</option>
-                <option value="MarkdownV2">{t("channels.markdown")}</option>
-              </select>
+              <NativeSelect name="parseMode">
+                <NativeSelectOption value="">
+                  {t("channels.plainText")}
+                </NativeSelectOption>
+                <NativeSelectOption value="HTML">
+                  {t("channels.html")}
+                </NativeSelectOption>
+                <NativeSelectOption value="MarkdownV2">
+                  {t("channels.markdown")}
+                </NativeSelectOption>
+              </NativeSelect>
             </Field>
-            <label className="check">
-              <input
-                type="checkbox"
+            <Label className="check">
+              <Checkbox
                 name="disablePreview"
                 defaultChecked
               />
               {t("channels.disablePreview")}
-            </label>
+            </Label>
           </>
         ))}
-      <label className="check">
-        <input
-          type="checkbox"
+      <Label className="check">
+        <Checkbox
           name="enabled"
           defaultChecked={channel?.enabled ?? true}
         />
         {t("channels.enable")}
-      </label>
+      </Label>
       <Button type="submit" disabled={busy}>{t("channels.save")}</Button>
     </form>
   );
@@ -1020,18 +974,22 @@ function DeliveriesPage(props: Props) {
   return (
     <>
       <Field label={t("deliveries.filter")}>
-        <select
+        <NativeSelect
           value={status}
           onChange={(e) => {
             setStatus(e.target.value);
             setOffset(0);
           }}
         >
-          <option value="">{t("deliveries.all")}</option>
+          <NativeSelectOption value="">
+            {t("deliveries.all")}
+          </NativeSelectOption>
           {Object.entries(names).map(([key, name]) => (
-            <option key={key} value={key}>{t(name)}</option>
+            <NativeSelectOption key={key} value={key}>
+              {t(name)}
+            </NativeSelectOption>
           ))}
-        </select>
+        </NativeSelect>
       </Field>
       <Result state={state}>
         <Card>
@@ -1118,15 +1076,21 @@ function LanguageSelector() {
   );
   return (
     <Field label={t("settings.language")}>
-      <select
+      <NativeSelect
         value={preference}
         onChange={(event) =>
           setLanguagePreference(event.target.value as LanguagePreference)}
       >
-        <option value="system">{t("settings.system")}</option>
-        <option value="zh-CN" lang="zh-CN">{t("language.zhCN")}</option>
-        <option value="en" lang="en">{t("language.en")}</option>
-      </select>
+        <NativeSelectOption value="system">
+          {t("settings.system")}
+        </NativeSelectOption>
+        <NativeSelectOption value="zh-CN" lang="zh-CN">
+          {t("language.zhCN")}
+        </NativeSelectOption>
+        <NativeSelectOption value="en" lang="en">
+          {t("language.en")}
+        </NativeSelectOption>
+      </NativeSelect>
     </Field>
   );
 }
@@ -1137,19 +1101,8 @@ function SettingsPage({ api, revision, run, busy }: Props) {
     "/settings",
     revision,
   );
-  const status = useData<
-    {
-      runtime: string;
-      retryPolicy: { maxAttempts: number; baseSeconds: number };
-    }
-  >(api, "/status", revision);
   return (
     <div className="columns">
-      <Card>
-        <CardContent>
-          <LanguageSelector />
-        </CardContent>
-      </Card>
       <Card>
         <CardContent>
           <h2>{t("settings.fetch")}</h2>
@@ -1189,63 +1142,9 @@ function SettingsPage({ api, revision, run, busy }: Props) {
           </Result>
         </CardContent>
       </Card>
-      <Card>
-        <CardContent>
-          <h2>{t("settings.info")}</h2>
-          <Result state={status}>
-            <p>
-              {t("settings.runtime", { runtime: status.data?.runtime ?? "" })}
-            </p>
-            <p>
-              {t("settings.attempts", {
-                count: status.data?.retryPolicy.maxAttempts ?? 0,
-              })}
-            </p>
-            <p className="muted">
-              {t("settings.retention")}
-            </p>
-          </Result>
-        </CardContent>
-      </Card>
     </div>
   );
 }
-const pages = [
-  "nav.overview",
-  "nav.feeds",
-  "nav.channels",
-  "nav.deliveries",
-  "nav.settings",
-];
-const pageIcons: ReactNode[] = [
-  <Fragment key="overview">
-    <rect x="3" y="3" width="7" height="9" rx="1" />
-    <rect x="14" y="3" width="7" height="5" rx="1" />
-    <rect x="14" y="12" width="7" height="9" rx="1" />
-    <rect x="3" y="16" width="7" height="5" rx="1" />
-  </Fragment>,
-  <Fragment key="feeds">
-    <path d="M4 11a9 9 0 0 1 9 9" />
-    <path d="M4 4a16 16 0 0 1 16 16" />
-    <circle cx="5" cy="19" r="1" />
-  </Fragment>,
-  <Fragment key="channels">
-    <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9" />
-    <path d="M10 21h4" />
-  </Fragment>,
-  <Fragment key="deliveries">
-    <circle cx="12" cy="12" r="9" />
-    <path d="M12 7v5l3 2" />
-  </Fragment>,
-  <Fragment key="settings">
-    <path d="M4 7h9" />
-    <path d="M17 7h3" />
-    <circle cx="15" cy="7" r="2" />
-    <path d="M4 17h3" />
-    <path d="M11 17h9" />
-    <circle cx="9" cy="17" r="2" />
-  </Fragment>,
-];
 function App() {
   const { t } = useTranslation();
   const [session, setSession] = useState<
@@ -1306,6 +1205,13 @@ function App() {
       setBusy(false);
     }
   };
+  const handleSignOut = async () => {
+    if (await run(() => deleteSession(), t("auth.signedOut"))) {
+      setSession("signed-out");
+      setMessage("");
+      setError("");
+    }
+  };
   const props = { api, revision, run, busy };
   if (session === "checking") {
     return (
@@ -1355,86 +1261,51 @@ function App() {
   }
   return (
     <Feedback.Provider value={{ error, message, busy }}>
-      <div className="shell">
-        <aside>
-          <div className="brand">PushRSS</div>
-          <nav aria-label={t("nav.main")}>
-            {pages.map((p, i) => (
-              <Button
-                type="button"
-                key={t(p)}
-                variant={page === i ? "secondary" : "ghost"}
-                aria-current={page === i ? "page" : undefined}
-                onClick={() => {
-                  setPage(i);
-                  setMessage("");
-                  setError("");
-                }}
-              >
-                <svg
-                  aria-hidden="true"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  {pageIcons[i]}
-                </svg>
-                {t(p)}
-              </Button>
-            ))}
-          </nav>
-        </aside>
-        <main>
-          <header className="section-head">
-            <div>
-              <p className="eyebrow">
-                {t("nav.breadcrumb", { page: t(pages[page]) })}
-              </p>
-              <h1>{t(pages[page])}</h1>
+      <SidebarProvider>
+        <AppSidebar
+          page={page}
+          onNavigate={(next) => {
+            setPage(next);
+            setMessage("");
+            setError("");
+          }}
+        />
+        <SidebarInset className="min-w-0">
+          <div className="page-content">
+            <header className="section-head page-header">
+              <div className="flex items-center gap-3">
+                <SidebarTrigger />
+                <div>
+                  <p className="eyebrow">
+                    {t("nav.breadcrumb", { page: t(pages[page]) })}
+                  </p>
+                  <h1>{t(pages[page])}</h1>
+                </div>
+              </div>
+              <PageHeaderActions
+                busy={busy}
+                onRefresh={() => setRevision((n) => n + 1)}
+                onSignOut={handleSignOut}
+              />
+            </header>
+            <div role="status" aria-live="polite">
+              {message && <p className="success">{message}</p>}
             </div>
-            <div className="actions">
-              <Button
-                disabled={busy}
-                variant="outline"
-                onClick={() => setRevision((n) => n + 1)}
-              >
-                {t("common.refresh")}
-              </Button>
-              <Button
-                disabled={busy}
-                variant="outline"
-                onClick={async () => {
-                  if (await run(() => deleteSession(), t("auth.signedOut"))) {
-                    setSession("signed-out");
-                    setMessage("");
-                    setError("");
-                  }
-                }}
-              >
-                {t("auth.signOut")}
-              </Button>
+            {error && <p role="alert" className="error notice">{error}</p>}
+            <div key={page}>
+              {page === 0
+                ? <OverviewPage {...props} />
+                : page === 1
+                ? <FeedsPage {...props} />
+                : page === 2
+                ? <ChannelsPage {...props} />
+                : page === 3
+                ? <DeliveriesPage {...props} />
+                : <SettingsPage {...props} />}
             </div>
-          </header>
-          <div role="status" aria-live="polite">
-            {message && <p className="success">{message}</p>}
           </div>
-          {error && <p role="alert" className="error notice">{error}</p>}
-          <div key={page}>
-            {page === 0
-              ? <OverviewPage {...props} />
-              : page === 1
-              ? <FeedsPage {...props} />
-              : page === 2
-              ? <ChannelsPage {...props} />
-              : page === 3
-              ? <DeliveriesPage {...props} />
-              : <SettingsPage {...props} />}
-          </div>
-        </main>
-      </div>
+        </SidebarInset>
+      </SidebarProvider>
     </Feedback.Provider>
   );
 }
