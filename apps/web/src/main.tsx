@@ -1,3 +1,11 @@
+import { I18nextProvider, useTranslation } from "react-i18next";
+import {
+  getLanguagePreference,
+  i18n,
+  type LanguagePreference,
+  setLanguagePreference,
+  subscribeLanguagePreference,
+} from "./i18n.ts";
 import {
   createContext,
   Fragment,
@@ -8,6 +16,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import { createRoot } from "react-dom/client";
 import type {
@@ -34,7 +43,9 @@ import { Badge } from "./components/ui/badge.tsx";
 import "./style.css";
 type PublicChannel = Omit<Channel, "encryptedConfig">;
 const date = (n: number | null) =>
-  n === null ? "暂无记录" : new Date(n).toLocaleString("zh-CN");
+  n === null
+    ? i18n.t("common.empty")
+    : new Date(n).toLocaleString(i18n.resolvedLanguage);
 const secondsToMinutes = (seconds: number) =>
   Math.max(1, Math.round(seconds / 60));
 const minutesToSeconds = (minutes: number, existingSeconds?: number) =>
@@ -43,10 +54,10 @@ const minutesToSeconds = (minutes: number, existingSeconds?: number) =>
     ? existingSeconds
     : minutes * 60;
 const names = {
-  pending: "等待发送",
-  sending: "发送中",
-  sent: "已送达",
-  failed: "失败",
+  pending: "status.pending",
+  sending: "status.sending",
+  sent: "status.sent",
+  failed: "status.failed",
 };
 function Field({ label, children }: { label: string; children: ReactNode }) {
   return (
@@ -56,8 +67,9 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
     </label>
   );
 }
-function Empty({ children = "暂无记录" }: { children?: ReactNode }) {
-  return <p className="empty">{children}</p>;
+function Empty({ children }: { children?: ReactNode }) {
+  const { t } = useTranslation();
+  return <p className="empty">{children ?? t("common.empty")}</p>;
 }
 function useData<T>(api: Api, path: string, revision: number) {
   const [data, setData] = useState<T>();
@@ -85,12 +97,13 @@ function Result(
     children: ReactNode;
   },
 ) {
+  const { t } = useTranslation();
   return state.loading
-    ? <Empty>正在加载…</Empty>
+    ? <Empty>{t("common.loading")}</Empty>
     : state.error
     ? (
       <p role="alert" className="error">
-        {state.error}，请点击“更新数据”重试。
+        {t("error.refresh", { error: state.error })}
       </p>
     )
     : <>{children}</>;
@@ -102,6 +115,7 @@ function Pager(
     set: (n: number) => void;
   },
 ) {
+  const { t } = useTranslation();
   return (
     <div className="actions pager">
       <Button
@@ -109,15 +123,15 @@ function Pager(
         disabled={!offset}
         onClick={() => set(offset - 20)}
       >
-        上一页
+        {t("common.previous")}
       </Button>
-      <span>第 {offset / 20 + 1} 页</span>
+      <span>{t("common.page", { page: offset / 20 + 1 })}</span>
       <Button
         variant="outline"
         disabled={count < 20}
         onClick={() => set(offset + 20)}
       >
-        下一页
+        {t("common.next")}
       </Button>
     </div>
   );
@@ -130,6 +144,7 @@ function Modal(
     children: ReactNode;
   },
 ) {
+  const { t } = useTranslation();
   const feedback = useContext(Feedback);
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -149,7 +164,7 @@ function Modal(
       <div className="section-head">
         <h2>{title}</h2>
         <Button variant="outline" disabled={feedback.busy} onClick={close}>
-          关闭
+          {t("common.close")}
         </Button>
       </div>
       {feedback.error && <p role="alert" className="error">{feedback.error}</p>}
@@ -163,6 +178,7 @@ function Modal(
 type Run = (work: () => Promise<unknown>, message: string) => Promise<boolean>;
 type Props = { api: Api; revision: number; run: Run; busy: boolean };
 function OverviewPage({ api, revision }: Props) {
+  const { t } = useTranslation();
   const start = new Date();
   start.setHours(0, 0, 0, 0);
   const end = new Date(start);
@@ -178,10 +194,10 @@ function OverviewPage({ api, revision }: Props) {
         <>
           <div className="stats">
             {[
-              ["订阅源", state.data.feeds],
-              ["今日新增文章", state.data.articlesToday],
-              ["今日送达", state.data.sentToday],
-              ["失败投递", state.data.failed],
+              [t("nav.feeds"), state.data.feeds],
+              [t("overview.articles"), state.data.articlesToday],
+              [t("overview.sent"), state.data.sentToday],
+              [t("overview.failed"), state.data.failed],
             ].map(([name, n]) => (
               <Card key={name}>
                 <CardContent>
@@ -191,12 +207,9 @@ function OverviewPage({ api, revision }: Props) {
               </Card>
             ))}
           </div>
-          <p className="muted">
-            今日按浏览器所在时区统计；文章以入库时间计算，包含首次抓取的文章。
-          </p>
           <div className="columns">
-            {[["最近成功抓取", state.data.recentFeeds], [
-              "异常订阅源",
+            {[[t("overview.recent"), state.data.recentFeeds], [
+              t("overview.failing"),
               state.data.failingFeeds,
             ]].map(([title, feeds]) => (
               <Card key={title as string}>
@@ -207,7 +220,7 @@ function OverviewPage({ api, revision }: Props) {
                       <div className="row" key={f.id}>
                         <b>{f.title || f.url}</b>
                         <p className={f.lastError ? "error" : "muted"}>
-                          {title === "异常订阅源"
+                          {title === t("overview.failing")
                             ? f.lastError
                             : date(f.lastFetchedAt)}
                         </p>
@@ -224,24 +237,26 @@ function OverviewPage({ api, revision }: Props) {
   );
 }
 function Article({ item }: { item: StoredItem }) {
+  const { t } = useTranslation();
   return (
     <article>
       <h3>{item.title}</h3>
       <p className="muted">
-        {item.author || "作者未提供"} · {date(item.publishedAt)}
+        {item.author || t("article.noAuthor")} · {date(item.publishedAt)}
       </p>
       {safeLink(item.link) && (
         <a href={safeLink(item.link)} target="_blank" rel="noopener noreferrer">
-          阅读原文 ↗
+          {t("article.read")}
         </a>
       )}
-      <pre className="content">{item.content || item.summary || "正文为空"}</pre>
+      <pre className="content">{item.content || item.summary || t("article.empty")}</pre>
     </article>
   );
 }
 function FeedDetail(
   { feed, api, revision, run, busy }: Props & { feed: Feed },
 ) {
+  const { t } = useTranslation();
   const [offset, setOffset] = useState(0),
     [channelOffset, setChannelOffset] = useState(0);
   const items = useData<Page<StoredItem>>(
@@ -285,13 +300,16 @@ function FeedDetail(
   }, [api, feed.id, revision]);
   return (
     <>
-      <h3>关联通知渠道</h3>
+      <h3>{t("feeds.linkedChannels")}</h3>
       <Result state={channels}>
         {subError
           ? <p role="alert">{subError}</p>
           : channels.data?.items.map((ch) => (
             <div className="row section-head" key={ch.id}>
-              <span>{ch.name} · {ch.enabled ? "启用" : "暂停"}</span>
+              <span>
+                {ch.name} ·{" "}
+                {ch.enabled ? t("common.enabled") : t("common.inactive")}
+              </span>
               <Button
                 disabled={busy || subLoading || !!subError}
                 variant="outline"
@@ -302,14 +320,14 @@ function FeedDetail(
                       : api("/subscriptions", "POST", {
                         feedId: feed.id,
                         channelId: ch.id,
-                      }), "渠道关联已更新")}
+                      }), t("feeds.linksUpdated"))}
               >
-                {selected.includes(ch.id) ? "解除关联" : "关联"}
+                {selected.includes(ch.id) ? t("feeds.unlink") : t("feeds.link")}
               </Button>
             </div>
           ))}
         {!channels.data?.items.length && (
-          <Empty>请先在通知渠道页创建渠道。</Empty>
+          <Empty>{t("feeds.createChannel")}</Empty>
         )}
         <Pager
           offset={channelOffset}
@@ -317,7 +335,7 @@ function FeedDetail(
           set={setChannelOffset}
         />
       </Result>
-      <h3>文章记录</h3>
+      <h3>{t("feeds.articles")}</h3>
       <Result state={items}>
         {items.data?.items.map((item) => (
           <details key={item.id}>
@@ -325,9 +343,7 @@ function FeedDetail(
             <Article item={item} />
           </details>
         ))}
-        {!items.data?.items.length && (
-          <Empty>首次成功抓取后，文章会显示在这里。</Empty>
-        )}
+        {!items.data?.items.length && <Empty>{t("feeds.articlesEmpty")}</Empty>}
         <Pager
           offset={offset}
           count={items.data?.items.length ?? 0}
@@ -355,6 +371,7 @@ async function allItems<T>(
   }
 }
 function FeedsPage(props: Props) {
+  const { t } = useTranslation();
   const { api, revision, run, busy } = props;
   const [offset, setOffset] = useState(0);
   const [editing, setEditing] = useState<Feed | "new" | null>(null);
@@ -368,14 +385,13 @@ function FeedsPage(props: Props) {
   return (
     <>
       <div className="section-head list-heading">
-        <p className="muted">为订阅源设置抓取周期，并连接通知渠道。</p>
         <Button
           onClick={() => {
             createdId.current = undefined;
             setEditing("new");
           }}
         >
-          ＋ 添加订阅源
+          {t("feeds.add")}
         </Button>
       </div>
       <Result state={state}>
@@ -386,31 +402,42 @@ function FeedsPage(props: Props) {
                 <div className="section-head">
                   <div>
                     <h3>
-                      {f.title || "未命名订阅源"}{" "}
+                      {f.title || t("feeds.unnamed")}{" "}
                       <Badge variant="secondary">
-                        {f.enabled ? "启用" : "暂停"}
+                        {f.enabled ? t("common.enabled") : t("common.inactive")}
                       </Badge>
                     </h3>
                     <p className="url">{f.url}</p>
                   </div>
                   <div className="actions">
                     <Button variant="outline" onClick={() => setDetail(f)}>
-                      文章与渠道
+                      {t("feeds.detailsAction")}
                     </Button>
                     <Button variant="outline" onClick={() => setEditing(f)}>
-                      编辑
+                      {t("common.edit")}
                     </Button>
                   </div>
                 </div>
                 <p className="muted">
-                  {f.intervalSeconds % 60 ? "约" : ""}每{" "}
-                  {secondsToMinutes(f.intervalSeconds)}{" "}
-                  分钟 · 上次成功：{date(f.lastFetchedAt)}{" "}
-                  · 下次：{f.enabled ? date(f.nextFetchAt) : "已暂停"}
+                  {t(
+                    f.intervalSeconds % 60
+                      ? "feeds.scheduleApprox"
+                      : "feeds.schedule",
+                    {
+                      minutes: secondsToMinutes(f.intervalSeconds),
+                      last: date(f.lastFetchedAt),
+                      next: f.enabled
+                        ? date(f.nextFetchAt)
+                        : t("common.paused"),
+                    },
+                  )}
                 </p>
                 {f.lastError && (
                   <p className="error">
-                    {f.lastError}（连续失败 {f.failureCount} 次）
+                    {t("feeds.failures", {
+                      error: f.lastError,
+                      count: f.failureCount,
+                    })}
                   </p>
                 )}
                 <div className="actions">
@@ -420,24 +447,23 @@ function FeedsPage(props: Props) {
                     onClick={() =>
                       run(
                         () => api(`/feeds/${f.id}/refresh`, "POST"),
-                        "刷新已入队，请稍后更新数据查看结果",
+                        t("feeds.refreshQueued"),
                       )}
                   >
-                    立即刷新
+                    {t("feeds.refresh")}
                   </Button>
                   <Button
                     variant="outline"
                     disabled={busy}
                     onClick={() =>
                       run(
-                        () =>
-                          api(`/feeds/${f.id}`, "PATCH", {
-                            enabled: !f.enabled,
-                          }),
-                        "状态已更新",
+                        () => api(`/feeds/${f.id}`, "PATCH", {
+                          enabled: !f.enabled,
+                        }),
+                        t("common.statusUpdated"),
                       )}
                   >
-                    {f.enabled ? "暂停" : "启用"}
+                    {f.enabled ? t("common.pause") : t("common.enabled")}
                   </Button>
                   <Button
                     variant="destructive"
@@ -445,24 +471,22 @@ function FeedsPage(props: Props) {
                     onClick={() => {
                       if (
                         confirm(
-                          `删除“${f.title || f.url}”及其文章、投递和关联记录？`,
+                          t("feeds.deleteConfirm", { name: f.title || f.url }),
                         )
                       ) {
                         run(
                           () => api(`/feeds/${f.id}`, "DELETE"),
-                          "订阅源已删除",
+                          t("feeds.deleted"),
                         );
                       }
                     }}
                   >
-                    删除
+                    {t("common.delete")}
                   </Button>
                 </div>
               </div>
             ))}
-            {!state.data?.items.length && (
-              <Empty>添加第一个订阅源，开始收集新文章。</Empty>
-            )}
+            {!state.data?.items.length && <Empty>{t("feeds.empty")}</Empty>}
             <Pager
               offset={offset}
               count={state.data?.items.length ?? 0}
@@ -473,7 +497,7 @@ function FeedsPage(props: Props) {
       </Result>
       {editing && (
         <Modal
-          title={editing === "new" ? "添加订阅源" : "编辑订阅源"}
+          title={editing === "new" ? t("feeds.add") : t("feeds.edit")}
           close={() => setEditing(null)}
         >
           <FeedForm
@@ -513,7 +537,7 @@ function FeedsPage(props: Props) {
                     }
                   }
                   await api(`/feeds/${id}`, "PATCH", body);
-                }, "订阅源与通知渠道已保存")
+                }, t("feeds.saved"))
               ) setEditing(null);
             }}
           />
@@ -521,7 +545,7 @@ function FeedsPage(props: Props) {
       )}
       {detail && (
         <Modal
-          title={detail.title || "订阅源详情"}
+          title={detail.title || t("feeds.details")}
           close={() => setDetail(null)}
         >
           <FeedDetail {...props} feed={detail} />
@@ -546,6 +570,7 @@ function FeedForm(
     busy: boolean;
   },
 ) {
+  const { t } = useTranslation();
   const defaults = useData<{ defaultIntervalSeconds: number }>(
     api,
     "/settings",
@@ -579,11 +604,13 @@ function FeedForm(
       });
     return () => abort.abort();
   }, [api, feed?.id]);
-  if (!feed && defaults.loading) return <Empty>正在加载默认设置…</Empty>;
+  if (!feed && defaults.loading) {
+    return <Empty>{t("feeds.loadingDefaults")}</Empty>;
+  }
   if (!feed && defaults.error) {
     return (
       <p role="alert" className="error">
-        {defaults.error}，请关闭后重新打开表单。
+        {t("error.reopen", { error: defaults.error })}
       </p>
     );
   }
@@ -603,7 +630,7 @@ function FeedForm(
         }, selected);
       }}
     >
-      <Field label="名称">
+      <Field label={t("feeds.name")}>
         <Input
           name="title"
           defaultValue={feed?.title}
@@ -611,9 +638,9 @@ function FeedForm(
         />
       </Field>
       <p className="muted">
-        名称留空时，下一次成功抓取会使用 RSS / Atom 中的标题。
+        {t("feeds.nameHelp")}
       </p>
-      <Field label="RSS / Atom 地址">
+      <Field label={t("feeds.url")}>
         <Input
           name="url"
           type="url"
@@ -623,10 +650,10 @@ function FeedForm(
       </Field>
       {feed && (
         <p className="muted">
-          修改地址后保留已有文章与投递记录，清除抓取缓存，并按新地址继续去重。
+          {t("feeds.urlHelp")}
         </p>
       )}
-      <Field label="抓取周期（分钟，1～43200）">
+      <Field label={t("feeds.interval")}>
         <Input
           name="interval"
           type="number"
@@ -645,16 +672,17 @@ function FeedForm(
           type="checkbox"
           name="enabled"
           defaultChecked={feed?.enabled ?? true}
-        />启用订阅源
+        />
+        {t("feeds.enable")}
       </label>
       <fieldset disabled={busy || channelsLoading}>
-        <legend className="mb-2 font-medium">通知渠道</legend>
+        <legend className="mb-2 font-medium">{t("nav.channels")}</legend>
         {channelsLoading
-          ? <Empty>正在加载通知渠道…</Empty>
+          ? <Empty>{t("feeds.loadingChannels")}</Empty>
           : channelError
           ? (
             <p role="alert" className="error">
-              {channelError}，请关闭后重新打开表单。
+              {t("error.reopen", { error: channelError })}
             </p>
           )
           : channels.length
@@ -671,26 +699,26 @@ function FeedForm(
                   )}
               />
               {channel.name}
-              {channel.enabled ? "" : "（已暂停）"}
+              {channel.enabled ? "" : t("common.pausedSuffix")}
             </label>
           ))
-          : <Empty>请先创建通知渠道，再编辑订阅源完成选择。</Empty>}
+          : <Empty>{t("feeds.selectChannelsHelp")}</Empty>}
       </fieldset>
       <p className="muted">
-        首次抓取和手动刷新仅推送最新一篇新增文章；定时抓取会推送全部新增文章。
-        勾选的渠道随表单保存生效。
+        {t("feeds.policy")}
       </p>
       <Button
         type="submit"
         disabled={busy || channelsLoading || !!channelError ||
           (!feed && defaults.loading)}
       >
-        保存订阅源
+        {t("feeds.save")}
       </Button>
     </form>
   );
 }
 function ChannelsPage({ api, revision, run, busy }: Props) {
+  const { t } = useTranslation();
   const [offset, setOffset] = useState(0),
     [editing, setEditing] = useState<PublicChannel | "new" | null>(null);
   const state = useData<Page<PublicChannel>>(
@@ -701,8 +729,7 @@ function ChannelsPage({ api, revision, run, busy }: Props) {
   return (
     <>
       <div className="section-head list-heading">
-        <p className="muted">将新文章发送到指定通知渠道。</p>
-        <Button onClick={() => setEditing("new")}>＋ 添加渠道</Button>
+        <Button onClick={() => setEditing("new")}>{t("channels.add")}</Button>
       </div>
       <Result state={state}>
         <Card>
@@ -712,16 +739,17 @@ function ChannelsPage({ api, revision, run, busy }: Props) {
                 <h3>
                   {ch.name}{" "}
                   <Badge variant="secondary">
-                    {ch.enabled ? "启用" : "暂停"}
+                    {ch.enabled ? t("common.enabled") : t("common.inactive")}
                   </Badge>
                 </h3>
                 <p className="muted">
-                  {ch.type === "serverchan" ? "Server酱³" : "Telegram Bot"}{" "}
-                  · 凭据已加密保存
+                  {ch.type === "serverchan"
+                    ? t("channels.serverchan")
+                    : t("channels.telegram")} {t("channels.encrypted")}
                 </p>
                 <div className="actions">
                   <Button variant="outline" onClick={() => setEditing(ch)}>
-                    编辑渠道
+                    {t("channels.editAction")}
                   </Button>
                   <Button
                     disabled={busy || !ch.enabled}
@@ -729,7 +757,7 @@ function ChannelsPage({ api, revision, run, busy }: Props) {
                     onClick={() => {
                       if (
                         confirm(
-                          `向“${ch.name}”发送一条测试通知？已关联文章时使用最新一篇。`,
+                          t("channels.testConfirm", { name: ch.name }),
                         )
                       ) {
                         run(async () => {
@@ -738,32 +766,32 @@ function ChannelsPage({ api, revision, run, busy }: Props) {
                             "POST",
                           );
                           if (!result.ok) throw new Error(result.error);
-                        }, "测试通知已发送");
+                        }, t("channels.testSent"));
                       }
                     }}
                   >
-                    发送测试通知
+                    {t("channels.test")}
                   </Button>
                   <Button
                     variant="destructive"
                     disabled={busy}
                     onClick={() => {
-                      if (confirm(`删除“${ch.name}”及其关联和投递记录？`)) {
+                      if (
+                        confirm(t("channels.deleteConfirm", { name: ch.name }))
+                      ) {
                         run(
                           () => api(`/channels/${ch.id}`, "DELETE"),
-                          "渠道已删除",
+                          t("channels.deleted"),
                         );
                       }
                     }}
                   >
-                    删除
+                    {t("common.delete")}
                   </Button>
                 </div>
               </div>
             ))}
-            {!state.data?.items.length && (
-              <Empty>添加通知渠道，再前往订阅源详情完成关联。</Empty>
-            )}
+            {!state.data?.items.length && <Empty>{t("channels.empty")}</Empty>}
             <Pager
               offset={offset}
               count={state.data?.items.length ?? 0}
@@ -774,7 +802,7 @@ function ChannelsPage({ api, revision, run, busy }: Props) {
       </Result>
       {editing && (
         <Modal
-          title={editing === "new" ? "添加通知渠道" : "编辑通知渠道"}
+          title={editing === "new" ? t("channels.add") : t("channels.edit")}
           close={() => setEditing(null)}
         >
           <ChannelForm
@@ -787,7 +815,7 @@ function ChannelsPage({ api, revision, run, busy }: Props) {
                     editing === "new" ? "/channels" : `/channels/${editing.id}`,
                     editing === "new" ? "POST" : "PATCH",
                     body,
-                  ), "渠道已保存")
+                  ), t("channels.saved"))
               ) setEditing(null);
             }}
           />
@@ -803,6 +831,7 @@ function ChannelForm(
     busy: boolean;
   },
 ) {
+  const { t } = useTranslation();
   const [type, setType] = useState(channel?.type ?? "serverchan"),
     [replace, setReplace] = useState(!channel);
   return (
@@ -825,17 +854,17 @@ function ChannelForm(
         });
       }}
     >
-      <Field label="渠道名称">
+      <Field label={t("channels.name")}>
         <Input name="name" required defaultValue={channel?.name} />
       </Field>
-      <Field label="渠道类型">
+      <Field label={t("channels.type")}>
         <select
           value={type}
           disabled={!!channel}
           onChange={(e) => setType(e.target.value as PublicChannel["type"])}
         >
-          <option value="serverchan">Server酱³</option>
-          <option value="telegram">Telegram Bot</option>
+          <option value="serverchan">{t("channels.serverchan")}</option>
+          <option value="telegram">{t("channels.telegram")}</option>
         </select>
       </Field>
       {channel && (
@@ -844,17 +873,18 @@ function ChannelForm(
             type="checkbox"
             checked={replace}
             onChange={(e) => setReplace(e.target.checked)}
-          />替换完整渠道配置
+          />
+          {t("channels.replace")}
         </label>
       )}
       {channel && (
         <p className="muted">
-          默认保留已有配置。选择替换时，请填写完整凭据与发送选项。
+          {t("channels.replaceHelp")}
         </p>
       )}
       {replace && (type === "serverchan"
         ? (
-          <Field label="SendKey">
+          <Field label={t("channels.sendKey")}>
             <Input
               name="sendKey"
               type="password"
@@ -867,7 +897,7 @@ function ChannelForm(
         )
         : (
           <>
-            <Field label="Bot Token">
+            <Field label={t("channels.botToken")}>
               <Input
                 name="botToken"
                 type="password"
@@ -876,22 +906,22 @@ function ChannelForm(
                 pattern="[0-9]+:[A-Za-z0-9_-]+"
               />
             </Field>
-            <Field label="Chat ID">
+            <Field label={t("channels.chatId")}>
               <Input
                 name="chatId"
                 required
-                placeholder="-100… 或 @channel"
+                placeholder={t("channels.chatPlaceholder")}
                 pattern="-?[0-9]+|@[A-Za-z0-9_]+"
               />
             </Field>
-            <Field label="话题 ID（可选）">
+            <Field label={t("channels.thread")}>
               <Input name="threadId" type="number" min="1" />
             </Field>
-            <Field label="解析模式">
+            <Field label={t("channels.parseMode")}>
               <select name="parseMode">
-                <option value="">纯文本</option>
-                <option>HTML</option>
-                <option>MarkdownV2</option>
+                <option value="">{t("channels.plainText")}</option>
+                <option value="HTML">{t("channels.html")}</option>
+                <option value="MarkdownV2">{t("channels.markdown")}</option>
               </select>
             </Field>
             <label className="check">
@@ -899,7 +929,8 @@ function ChannelForm(
                 type="checkbox"
                 name="disablePreview"
                 defaultChecked
-              />关闭链接预览
+              />
+              {t("channels.disablePreview")}
             </label>
           </>
         ))}
@@ -908,13 +939,15 @@ function ChannelForm(
           type="checkbox"
           name="enabled"
           defaultChecked={channel?.enabled ?? true}
-        />启用渠道
+        />
+        {t("channels.enable")}
       </label>
-      <Button type="submit" disabled={busy}>保存渠道</Button>
+      <Button type="submit" disabled={busy}>{t("channels.save")}</Button>
     </form>
   );
 }
 function DeliveryDetail({ id, ...props }: Props & { id: string }) {
+  const { t } = useTranslation();
   const state = useData<Delivery>(
     props.api,
     `/deliveries/${id}`,
@@ -925,14 +958,29 @@ function DeliveryDetail({ id, ...props }: Props & { id: string }) {
     <Result state={state}>
       {d && (
         <>
-          <p>状态：{names[d.status]} · 本轮尝试 {d.attempts} 次</p>
           <p>
-            创建：{date(d.createdAt)}
-            <br />送达：{date(d.sentAt)}
-            <br />下次尝试：{date(d.nextAttemptAt)}
+            {t("deliveries.statusAttempts", {
+              status: t(names[d.status]),
+              count: d.attempts,
+            })}
           </p>
-          <p>外部消息 ID：{d.externalMessageId ?? "暂无"}</p>
-          {d.lastError && <p className="error">最近错误：{d.lastError}</p>}
+          <p>
+            {t("deliveries.created", { date: date(d.createdAt) })}
+            <br />
+            {t("deliveries.sent", { date: date(d.sentAt) })}
+            <br />
+            {t("deliveries.next", { date: date(d.nextAttemptAt) })}
+          </p>
+          <p>
+            {t("deliveries.externalId", {
+              id: d.externalMessageId ?? t("common.none"),
+            })}
+          </p>
+          {d.lastError && (
+            <p className="error">
+              {t("deliveries.error", { error: d.lastError })}
+            </p>
+          )}
           <DeliveryRelations {...props} delivery={d} />
         </>
       )}
@@ -942,6 +990,7 @@ function DeliveryDetail({ id, ...props }: Props & { id: string }) {
 function DeliveryRelations(
   { api, revision, delivery }: Props & { delivery: Delivery },
 ) {
+  const { t } = useTranslation();
   const item = useData<StoredItem>(api, `/items/${delivery.itemId}`, revision);
   const ch = useData<PublicChannel>(
     api,
@@ -951,13 +1000,14 @@ function DeliveryRelations(
   return (
     <>
       <Result state={ch}>
-        <p>通知渠道：{ch.data?.name}</p>
+        <p>{t("deliveries.channel", { name: ch.data?.name ?? "" })}</p>
       </Result>
       <Result state={item}>{item.data && <Article item={item.data} />}</Result>
     </>
   );
 }
 function DeliveriesPage(props: Props) {
+  const { t } = useTranslation();
   const { api, revision, run, busy } = props;
   const [offset, setOffset] = useState(0),
     [status, setStatus] = useState(""),
@@ -969,7 +1019,7 @@ function DeliveriesPage(props: Props) {
   );
   return (
     <>
-      <Field label="投递状态">
+      <Field label={t("deliveries.filter")}>
         <select
           value={status}
           onChange={(e) => {
@@ -977,9 +1027,9 @@ function DeliveriesPage(props: Props) {
             setOffset(0);
           }}
         >
-          <option value="">全部状态</option>
+          <option value="">{t("deliveries.all")}</option>
           {Object.entries(names).map(([key, name]) => (
-            <option key={key} value={key}>{name}</option>
+            <option key={key} value={key}>{t(name)}</option>
           ))}
         </select>
       </Field>
@@ -991,8 +1041,10 @@ function DeliveriesPage(props: Props) {
                 <div>
                   <h3>{d.itemTitle}</h3>
                   <p className="muted">
-                    订阅源：{d.feedTitle || d.feedUrl}{" "}
-                    · 通知渠道：{d.channelName}
+                    {t("deliveries.relations", {
+                      feed: d.feedTitle || d.feedUrl,
+                      channel: d.channelName,
+                    })}
                   </p>
                   <p>
                     <Badge
@@ -1000,9 +1052,9 @@ function DeliveriesPage(props: Props) {
                         ? "destructive"
                         : "secondary"}
                     >
-                      {names[d.status]}
+                      {t(names[d.status])}
                     </Badge>{" "}
-                    · 本轮尝试 {d.attempts} 次
+                    · {t("deliveries.attempts", { count: d.attempts })}
                   </p>
                   <p className="muted">{date(d.createdAt)}</p>
                   {d.lastError && <p className="error">{d.lastError}</p>}
@@ -1013,7 +1065,7 @@ function DeliveriesPage(props: Props) {
                     onClick={() =>
                       setDetail(d.id)}
                   >
-                    查看详情
+                    {t("deliveries.detailsAction")}
                   </Button>
                   {d.status === "failed" && (
                     <Button
@@ -1021,25 +1073,24 @@ function DeliveriesPage(props: Props) {
                       onClick={() => {
                         if (
                           confirm(
-                            "开启新一轮发送？结果未知的投递可能重复送达。",
+                            t("deliveries.retryConfirm"),
                           )
                         ) {
                           run(
                             () => api(`/deliveries/${d.id}/retry`, "POST"),
-                            "重试已入队",
+                            t("deliveries.retryQueued"),
                           );
                         }
                       }}
                     >
-                      重试
+                      {t("deliveries.retry")}
                     </Button>
                   )}
                 </div>
               </div>
             ))}
-            {!state.data?.items.length && (
-              <Empty>当前筛选下暂无投递记录。</Empty>
-            )}
+            {!state.data?.items.length && <Empty>{t("deliveries.empty")}
+            </Empty>}
             <Pager
               offset={offset}
               count={state.data?.items.length ?? 0}
@@ -1049,14 +1100,38 @@ function DeliveriesPage(props: Props) {
         </Card>
       </Result>
       {detail && (
-        <Modal title="投递详情" close={() => setDetail(undefined)}>
+        <Modal
+          title={t("deliveries.details")}
+          close={() => setDetail(undefined)}
+        >
           <DeliveryDetail {...props} id={detail} />
         </Modal>
       )}
     </>
   );
 }
+function LanguageSelector() {
+  const { t } = useTranslation();
+  const preference = useSyncExternalStore(
+    subscribeLanguagePreference,
+    getLanguagePreference,
+  );
+  return (
+    <Field label={t("settings.language")}>
+      <select
+        value={preference}
+        onChange={(event) =>
+          setLanguagePreference(event.target.value as LanguagePreference)}
+      >
+        <option value="system">{t("settings.system")}</option>
+        <option value="zh-CN" lang="zh-CN">{t("language.zhCN")}</option>
+        <option value="en" lang="en">{t("language.en")}</option>
+      </select>
+    </Field>
+  );
+}
 function SettingsPage({ api, revision, run, busy }: Props) {
+  const { t } = useTranslation();
   const settings = useData<{ defaultIntervalSeconds: number }>(
     api,
     "/settings",
@@ -1072,7 +1147,12 @@ function SettingsPage({ api, revision, run, busy }: Props) {
     <div className="columns">
       <Card>
         <CardContent>
-          <h2>抓取设置</h2>
+          <LanguageSelector />
+        </CardContent>
+      </Card>
+      <Card>
+        <CardContent>
+          <h2>{t("settings.fetch")}</h2>
           <Result state={settings}>
             {settings.data && (
               <form
@@ -1085,10 +1165,10 @@ function SettingsPage({ api, revision, run, busy }: Props) {
                         Number(new FormData(e.currentTarget).get("interval")),
                         settings.data?.defaultIntervalSeconds,
                       ),
-                    }), "默认抓取周期已保存");
+                    }), t("settings.saved"));
                 }}
               >
-                <Field label="新订阅源默认周期（分钟）">
+                <Field label={t("settings.interval")}>
                   <Input
                     name="interval"
                     type="number"
@@ -1101,10 +1181,9 @@ function SettingsPage({ api, revision, run, busy }: Props) {
                     )}
                   />
                 </Field>
-                <p className="muted">
-                  此设置用于新建订阅源，已有订阅源按各自周期运行。
-                </p>
-                <Button type="submit" disabled={busy}>保存设置</Button>
+                <Button type="submit" disabled={busy}>
+                  {t("settings.save")}
+                </Button>
               </form>
             )}
           </Result>
@@ -1112,12 +1191,18 @@ function SettingsPage({ api, revision, run, busy }: Props) {
       </Card>
       <Card>
         <CardContent>
-          <h2>运行信息</h2>
+          <h2>{t("settings.info")}</h2>
           <Result state={status}>
-            <p>运行平台：{status.data?.runtime}</p>
-            <p>每轮最多尝试：{status.data?.retryPolicy.maxAttempts} 次</p>
+            <p>
+              {t("settings.runtime", { runtime: status.data?.runtime ?? "" })}
+            </p>
+            <p>
+              {t("settings.attempts", {
+                count: status.data?.retryPolicy.maxAttempts ?? 0,
+              })}
+            </p>
             <p className="muted">
-              文章与投递保留至手动删除关联资源。任务记录保留 30 天。
+              {t("settings.retention")}
             </p>
           </Result>
         </CardContent>
@@ -1125,7 +1210,13 @@ function SettingsPage({ api, revision, run, busy }: Props) {
     </div>
   );
 }
-const pages = ["概览", "订阅源", "通知渠道", "投递记录", "设置"];
+const pages = [
+  "nav.overview",
+  "nav.feeds",
+  "nav.channels",
+  "nav.deliveries",
+  "nav.settings",
+];
 const pageIcons: ReactNode[] = [
   <Fragment key="overview">
     <rect x="3" y="3" width="7" height="9" rx="1" />
@@ -1156,6 +1247,7 @@ const pageIcons: ReactNode[] = [
   </Fragment>,
 ];
 function App() {
+  const { t } = useTranslation();
   const [session, setSession] = useState<
       "checking" | "signed-in" | "signed-out"
     >(
@@ -1166,11 +1258,21 @@ function App() {
     [busy, setBusy] = useState(false),
     [message, setMessage] = useState(""),
     [error, setError] = useState("");
+  useEffect(() => {
+    const clearFeedback = () => {
+      setMessage("");
+      setError("");
+    };
+    i18n.on("languageChanged", clearFeedback);
+    return () => {
+      i18n.off("languageChanged", clearFeedback);
+    };
+  }, []);
   const lock = useRef(false);
   const logout = useCallback(() => {
     setSession("signed-out");
     setMessage("");
-    setError("登录已过期，请重新输入管理密码");
+    setError(i18n.t("auth.expired"));
   }, []);
   const api = useMemo(() => createApi(undefined, logout), [logout]);
   useEffect(() => {
@@ -1197,7 +1299,7 @@ function App() {
       setRevision((n) => n + 1);
       return true;
     } catch (e) {
-      setError(e instanceof Error ? e.message : "操作失败");
+      setError(e instanceof Error ? e.message : t("error.operation"));
       return false;
     } finally {
       lock.current = false;
@@ -1209,7 +1311,7 @@ function App() {
     return (
       <main className="login">
         <div className="brand">PushRSS</div>
-        <p role="status" className="muted">正在检查登录状态…</p>
+        <p role="status" className="muted">{t("auth.checking")}</p>
       </main>
     );
   }
@@ -1217,34 +1319,35 @@ function App() {
     return (
       <main className="login">
         <div className="brand">PushRSS</div>
-        <h1>登录 PushRSS</h1>
-        <p className="muted">登录管理订阅源、通知渠道和投递记录。</p>
+        <h1>{t("auth.title")}</h1>
+        <LanguageSelector />
+        <p className="muted">{t("auth.description")}</p>
         <form
           onSubmit={async (e) => {
             e.preventDefault();
             const password = String(
               new FormData(e.currentTarget).get("password") ?? "",
             );
-            if (await run(() => createSession(password), "已连接管理服务")) {
+            if (await run(() => createSession(password), t("auth.connected"))) {
               setSession("signed-in");
             }
           }}
         >
-          <Field label="管理密码">
+          <Field label={t("auth.password")}>
             <Input
               name="password"
               type="password"
               required
               autoComplete="current-password"
-              placeholder="输入你设置的管理密码"
+              placeholder={t("auth.placeholder")}
             />
           </Field>
           <p className="muted">
-            登录状态会在当前浏览器保留 7 天；退出时清除。
+            {t("auth.session")}
           </p>
           {error && <p className="error" role="alert">{error}</p>}
           <Button type="submit" disabled={busy}>
-            {busy ? "正在连接…" : "进入控制台 →"}
+            {busy ? t("auth.connecting") : t("auth.submit")}
           </Button>
         </form>
       </main>
@@ -1255,11 +1358,11 @@ function App() {
       <div className="shell">
         <aside>
           <div className="brand">PushRSS</div>
-          <nav aria-label="主导航">
+          <nav aria-label={t("nav.main")}>
             {pages.map((p, i) => (
               <Button
                 type="button"
-                key={p}
+                key={t(p)}
                 variant={page === i ? "secondary" : "ghost"}
                 aria-current={page === i ? "page" : undefined}
                 onClick={() => {
@@ -1279,7 +1382,7 @@ function App() {
                 >
                   {pageIcons[i]}
                 </svg>
-                {p}
+                {t(p)}
               </Button>
             ))}
           </nav>
@@ -1287,8 +1390,10 @@ function App() {
         <main>
           <header className="section-head">
             <div>
-              <p className="eyebrow">工作台 / {pages[page]}</p>
-              <h1>{pages[page]}</h1>
+              <p className="eyebrow">
+                {t("nav.breadcrumb", { page: t(pages[page]) })}
+              </p>
+              <h1>{t(pages[page])}</h1>
             </div>
             <div className="actions">
               <Button
@@ -1296,20 +1401,20 @@ function App() {
                 variant="outline"
                 onClick={() => setRevision((n) => n + 1)}
               >
-                更新数据
+                {t("common.refresh")}
               </Button>
               <Button
                 disabled={busy}
                 variant="outline"
                 onClick={async () => {
-                  if (await run(() => deleteSession(), "已退出")) {
+                  if (await run(() => deleteSession(), t("auth.signedOut"))) {
                     setSession("signed-out");
                     setMessage("");
                     setError("");
                   }
                 }}
               >
-                退出
+                {t("auth.signOut")}
               </Button>
             </div>
           </header>
@@ -1333,4 +1438,8 @@ function App() {
     </Feedback.Provider>
   );
 }
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <I18nextProvider i18n={i18n}>
+    <App />
+  </I18nextProvider>,
+);

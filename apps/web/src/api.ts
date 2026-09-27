@@ -1,3 +1,4 @@
+import { i18n } from "./i18n.ts";
 import { passwordAuthorization } from "../../../packages/shared/auth.ts";
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -31,14 +32,14 @@ export function createApi(
       });
     } catch (error) {
       if (signal?.aborted) throw error;
-      throw new Error("连接失败，请检查服务后重试");
+      throw new Error(i18n.t("error.network"));
     }
     if (response.status === 401) unauthorized();
     if (!response.ok) {
       const data = await response.json().catch(() => null);
       throw new ApiError(
         response.status,
-        data?.error?.message ?? `请求失败（${response.status}）`,
+        apiErrorMessage(data, response.status),
       );
     }
     return response.status === 204 ? undefined as T : await response.json();
@@ -56,13 +57,13 @@ export async function createSession(
       headers: { Authorization: passwordAuthorization(password) },
     });
   } catch {
-    throw new Error("连接失败，请检查服务后重试");
+    throw new Error(i18n.t("error.network"));
   }
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     throw new ApiError(
       response.status,
-      data?.error?.message ?? `请求失败（${response.status}）`,
+      apiErrorMessage(data, response.status),
     );
   }
 }
@@ -76,13 +77,13 @@ export async function deleteSession(
       credentials: "same-origin",
     });
   } catch {
-    throw new Error("连接失败，请检查服务后重试");
+    throw new Error(i18n.t("error.network"));
   }
   if (!response.ok) {
     const data = await response.json().catch(() => null);
     throw new ApiError(
       response.status,
-      data?.error?.message ?? `请求失败（${response.status}）`,
+      apiErrorMessage(data, response.status),
     );
   }
 }
@@ -99,4 +100,14 @@ export function safeLink(value: string | null): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+function apiErrorMessage(
+  data: { error?: { code?: string; message?: string } } | null,
+  status: number,
+): string {
+  const key = `error.${data?.error?.code}`;
+  return i18n.exists(key)
+    ? i18n.t(key)
+    : data?.error?.message ?? i18n.t("error.request", { status });
 }

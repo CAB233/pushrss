@@ -94,6 +94,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({
     viewport: { width: 1360, height: 900 },
+    locale: "zh-CN",
   });
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("dialog", (dialog) => dialog.accept());
@@ -109,7 +110,7 @@ try {
     .toBeVisible();
   const nav = page.getByRole("navigation");
   await nav.getByRole("button", { name: "通知渠道" }).click();
-  await page.getByRole("button", { name: "添加渠道" }).click();
+  await page.getByRole("button", { name: "添加通知渠道" }).click();
   let dialog = page.getByRole("dialog");
   await dialog.getByLabel("渠道名称").fill("浏览器测试渠道");
   await dialog.getByLabel("SendKey").fill("sctp123tBrowserTest");
@@ -252,15 +253,15 @@ try {
     throw new Error("重试入队失败");
   }
   await nav.getByRole("button", { name: "设置" }).click();
-  await page.getByLabel("新订阅源默认周期").fill("4.5");
+  await page.getByLabel("添加订阅源时的默认周期").fill("4.5");
   await page.getByRole("button", { name: "保存设置" }).click();
   if (await repositories.settings.get("defaultIntervalSeconds") !== undefined) {
     throw new Error("默认周期接受了小数分钟");
   }
-  await page.getByLabel("新订阅源默认周期").fill("4");
+  await page.getByLabel("添加订阅源时的默认周期").fill("4");
   await page.getByRole("button", { name: "保存设置" }).click();
   await expect(page.getByRole("status")).toContainText("默认抓取周期已保存");
-  await expect(page.getByLabel("新订阅源默认周期")).toHaveValue("4");
+  await expect(page.getByLabel("添加订阅源时的默认周期")).toHaveValue("4");
   if (await repositories.settings.get("defaultIntervalSeconds") !== 240) {
     throw new Error("设置保存失败");
   }
@@ -285,7 +286,7 @@ try {
   await page.getByRole("button", { name: "删除", exact: true }).click();
   await expect(page.getByText("添加通知渠道，再前往订阅源详情完成关联。"))
     .toBeVisible();
-  await page.getByRole("button", { name: "添加渠道" }).click();
+  await page.getByRole("button", { name: "添加通知渠道" }).click();
   dialog = page.getByRole("dialog");
   await dialog.getByLabel("渠道名称").fill("Telegram 测试");
   await dialog.getByLabel("渠道类型").selectOption("telegram");
@@ -395,9 +396,84 @@ try {
   await expect(page.getByLabel("管理密码")).toBeVisible();
   await page.reload();
   await expect(page.getByLabel("管理密码")).toBeVisible();
+  // Browser preferences, explicit selection, persistence and automatic switching.
+  const english = await browser.newPage({ locale: "en-US" });
+  english.on("pageerror", (e) => errors.push(e.message));
+  await english.goto(`http://127.0.0.1:${server.addr.port}`);
+  await expect(english.locator("html")).toHaveAttribute("lang", "en");
+  await expect(english.getByLabel("Page language")).toHaveValue("system");
+  await english.getByLabel("Admin password").fill("wrong");
+  await english.getByRole("button", { name: "Open dashboard" }).click();
+  await expect(english.getByRole("alert")).toHaveText(
+    "Incorrect admin password",
+  );
+  await english.getByLabel("Admin password").fill(token);
+  await english.getByRole("button", { name: "Open dashboard" }).click();
+  await expect(english.getByRole("heading", { name: "Overview", exact: true }))
+    .toBeVisible();
+  const englishNav = english.getByRole("navigation");
+  for (
+    const name of ["Feeds", "Notification channels", "Deliveries", "Settings"]
+  ) {
+    await englishNav.getByRole("button", { name, exact: true }).click();
+    await expect(english.getByRole("heading", { name, exact: true }))
+      .toBeVisible();
+  }
+  await english.getByLabel("Page language").selectOption("zh-CN");
+  await expect(english.getByRole("heading", { name: "设置", exact: true }))
+    .toBeVisible();
+  await expect(english.locator("html")).toHaveAttribute("lang", "zh-CN");
+  await english.reload();
+  await expect(english.getByRole("heading", { name: "概览", exact: true }))
+    .toBeVisible();
+  await english.getByRole("navigation").getByRole("button", { name: "设置" })
+    .click();
+  await expect(english.getByLabel("页面语言")).toHaveValue("zh-CN");
+  await english.getByLabel("页面语言").selectOption("system");
+  await expect(english.getByRole("heading", { name: "Settings", exact: true }))
+    .toBeVisible();
+  await english.evaluate(() => {
+    Object.defineProperty(navigator, "languages", {
+      configurable: true,
+      value: ["zh-CN"],
+    });
+    globalThis.dispatchEvent(new Event("languagechange"));
+  });
+  await expect(english.getByRole("heading", { name: "设置", exact: true }))
+    .toBeVisible();
+  await english.getByLabel("页面语言").selectOption("en");
+  await english.evaluate(() =>
+    globalThis.dispatchEvent(new Event("languagechange"))
+  );
+  await expect(english.locator("html")).toHaveAttribute("lang", "en");
+  await english.setViewportSize({ width: 390, height: 844 });
+  if (
+    await english.evaluate(() =>
+      document.documentElement.scrollWidth > innerWidth
+    )
+  ) {
+    throw new Error("英文设置页窄屏溢出");
+  }
+  await english.getByRole("button", { name: "Sign out", exact: true }).click();
+  await english.reload();
+  await expect(english.getByLabel("Admin password")).toBeVisible();
+  await expect(english.getByLabel("Page language")).toHaveValue("en");
+  await english.getByLabel("Page language").selectOption("system");
+  await english.reload();
+  await expect(english.getByLabel("Page language")).toHaveValue("system");
+  await english.close();
+
+  const fallback = await browser.newPage({ locale: "fr-FR" });
+  await fallback.addInitScript(() =>
+    localStorage.setItem("pushrss.language", "invalid")
+  );
+  await fallback.goto(`http://127.0.0.1:${server.addr.port}`);
+  await expect(fallback.getByLabel("Admin password")).toBeVisible();
+  await expect(fallback.getByLabel("Page language")).toHaveValue("system");
+  await fallback.close();
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "中文界面登录、刷新保持会话、退出、配置、关联、模拟测试通知、文章安全展示、投递重试、设置、删除及窄屏验证通过",
+    "中英文语言检测、切换、持久化、回退、窄屏及中文界面登录、刷新保持会话、退出、配置、关联、模拟测试通知、文章安全展示、投递重试、设置、删除及窄屏验证通过",
   );
 } finally {
   await browser.close();

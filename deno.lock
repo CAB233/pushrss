@@ -12,7 +12,9 @@
     "npm:drizzle-orm@0.45.2": "0.45.2",
     "npm:fast-xml-parser@5.11.0": "5.11.0",
     "npm:hono@4.13.8": "4.13.8",
+    "npm:i18next@26.4.2": "26.4.2",
     "npm:react-dom@19.2.0": "19.2.0_react@19.2.0",
+    "npm:react-i18next@17.0.15": "17.0.15_i18next@26.4.2_react@19.2.0",
     "npm:react@19.2.0": "19.2.0",
     "npm:tailwind-merge@3.7.0": "3.7.0",
     "npm:tailwindcss@4.3.3": "4.3.3",
@@ -22,6 +24,9 @@
     "npm:wrangler@4.130.0": "4.130.0"
   },
   "npm": {
+    "@babel/runtime@7.29.7": {
+      "integrity": "sha512-Nq8OhGWiZIZGV6hLHoyAKLLcJihP/xFeBMGJoUrxTX2psI8dCifzLhZISFb+VWS3wFMRDmCGw5R+dOySCqPLhw=="
+    },
     "@cloudflare/kv-asset-handler@0.5.0": {
       "integrity": "sha512-jxQYkj8dSIzc0cD6cMMNdOc1UVjqSqu8BZdor5s8cGjW2I8BjODt/kWPVdY+u9zj3ms75Q5qaZgnxUad83+eAg=="
     },
@@ -757,6 +762,12 @@
     "hono@4.13.8": {
       "integrity": "sha512-/Gng7NfoykZl2pjukW5Z6+8Yxm3BPRf86GTbQnt0SbySkvax4fyL4H3HhY1cCpBGmiW9XDRFzRV+CXK2W8QudQ=="
     },
+    "html-parse-stringify@4.0.1": {
+      "integrity": "sha512-0zHsZJrK7S3K2aucXWL6ycoYJ/iNtIcFHC/nYQgFklPtrv5LpJctIiSCroWZWeuoXvuyFdzp6KzjJQ+OT5MfFw=="
+    },
+    "i18next@26.4.2": {
+      "integrity": "sha512-RX+R0VLg13IbvRuJSxnqykUFS9vQZTl8wYpWPCIUDWVrSGjsQywB5Y+pjzrkboxGAuYfJZVH1InFTdgBdxq6ug=="
+    },
     "is-unsafe@2.0.2": {
       "integrity": "sha512-HgbIHPBH0KHHCcjLfGsCvhtPTVxjaAZlXjwdz7/GQC40SjSe4sfQsar8J5VFo8JOSbarkpV0OLG95bbaNd9aAQ=="
     },
@@ -977,6 +988,16 @@
         "scheduler"
       ]
     },
+    "react-i18next@17.0.15_i18next@26.4.2_react@19.2.0": {
+      "integrity": "sha512-7uYpx/oBkesLto7cOzOmfITlUBaXHCAcFahmgETMfWr8nbbWRRnVGvz8wsH/xpbNcyoH+NpCcnOQEqWPMO6/hw==",
+      "dependencies": [
+        "@babel/runtime",
+        "html-parse-stringify",
+        "i18next",
+        "react",
+        "use-sync-external-store"
+      ]
+    },
     "react@19.2.0": {
       "integrity": "sha512-tmbWg6W31tQLeB5cdIBOicJDJRR2KzXsV7uSK9iNfLWQ5bIZfxuPEHp7M8wiHyHnn0DD1i7w3Zmin0FtkrwoCQ=="
     },
@@ -1087,6 +1108,12 @@
         "pathe"
       ]
     },
+    "use-sync-external-store@1.6.0_react@19.2.0": {
+      "integrity": "sha512-Pp6GSwGP/NrPIrxVFAIkOQeyw8lFenOHijQWkUTrDvrF4ALqylP2C/KCkeS9dpUM3KvYRQhna5vt7IL95+ZQ9w==",
+      "dependencies": [
+        "react"
+      ]
+    },
     "vite@8.3.0": {
       "integrity": "sha512-lhZBVvEHefgE+HQZC9O7EBJgCU/nVzFNl7vkS4RE0APtWLP02/8QVIkQtzBxPquh7lq5/78NHipTj7ODQ6XuyQ==",
       "dependencies": [
@@ -1167,7 +1194,9 @@
         "npm:drizzle-orm@0.45.2",
         "npm:fast-xml-parser@5.11.0",
         "npm:hono@4.13.8",
+        "npm:i18next@26.4.2",
         "npm:react-dom@19.2.0",
+        "npm:react-i18next@17.0.15",
         "npm:react@19.2.0",
         "npm:tailwind-merge@3.7.0",
         "npm:tailwindcss@4.3.3",
