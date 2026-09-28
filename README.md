@@ -43,6 +43,10 @@ PUSHRSS_WEB_DIR=apps/web/dist deno task dev:api
 
 ## Docker 自托管
 
+镜像采用多阶段构建：后端及依赖打包为单个 JavaScript 文件，最终基于 Deno
+distroless 镜像，仅复制后端包、SQL
+迁移、前端静态产物与备份脚本。启动使用本地文件，构建工具和依赖缓存留在构建阶段。
+
 需要 Docker 和 Docker Compose。先按“本地启动”中的方法创建 `.env`
 并填写主密钥与管理密码，然后运行：
 
@@ -174,8 +178,8 @@ WAL / SHM 文件，然后用对应的主密钥启动。Docker
 ```sh
 docker compose stop pushrss
 docker compose run --rm --no-deps -v "$PWD/backups/pushrss-日期.db:/restore.db:ro" \
-  --entrypoint sh pushrss -c \
-  'cp /restore.db /data/pushrss.db && rm -f /data/pushrss.db-wal /data/pushrss.db-shm'
+  --entrypoint /bin/deno pushrss eval \
+  'Deno.copyFileSync("/restore.db", "/data/pushrss.db"); for (const suffix of ["-wal", "-shm"]) { try { Deno.removeSync("/data/pushrss.db" + suffix); } catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; } }'
 cp "backups/pushrss-日期.env" .env
 docker compose up -d
 ```
