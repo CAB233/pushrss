@@ -43,6 +43,14 @@ PUSHRSS_WEB_DIR=apps/web/dist deno task dev:api
 
 ## Docker 自托管
 
+发布正式 GitHub Release 或在 Actions 中手动运行 `Release` 工作流，会构建并推送
+`ghcr.io/cab233/pushrss:latest`（linux/amd64）。手动运行发布所选 ref 的代码，
+预发布 Release 跳过发布。工作流使用仓库自带的 `GITHUB_TOKEN` 登录 GHCR。
+
+```sh
+docker pull ghcr.io/cab233/pushrss:latest
+```
+
 镜像采用多阶段构建：后端及依赖打包为单个 JavaScript 文件，最终基于 Deno
 distroless 镜像，仅复制后端包、SQL
 迁移、前端静态产物与备份脚本。启动使用本地文件，构建工具和依赖缓存留在构建阶段。
@@ -189,7 +197,6 @@ Deno 直接部署遵循相同步骤：停止 Deno 进程，将快照复制到
 `.env`，再启动服务。恢复后通过 `/health`
 和管理界面检查订阅源、渠道及投递记录；结果未知的投递应在核对接收端后手动重试。
 
-## 开发与验证
 
 仓库使用 Deno workspace。`apps/web` 是 React 管理界面，`apps/server` 是共享 Hono
 API；`packages/core` 实现抓取和通知流程，`packages/db` 保存共享 schema 与迁移，

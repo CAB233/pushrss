@@ -1,0 +1,49 @@
+{
+  "name": "pushrss-compatibility",
+  "main": "worker.ts",
+  "compatibility_date": "2026-09-08",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pushrss-test",
+      "database_id": "00000000-0000-0000-0000-000000000001",
+      "migrations_dir": "../packages/db/migrations"
+    }
+  ],
+  "queues": {
+    "producers": [
+      {
+        "binding": "JOB_QUEUE",
+        "queue": "pushrss-test-jobs"
+      }
+    ],
+    "consumers": [
+      {
+        "queue": "pushrss-test-jobs",
+        "max_batch_size": 1,
+        "max_batch_timeout": 1,
+        "max_retries": 4,
+        "max_concurrency": 2
+      }
+    ]
+  },
+  "triggers": {
+    "crons": [
+      "* * * * *"
+    ]
+  },
+  "vars": {
+    "PUSHRSS_MASTER_KEY": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=",
+    "PUSHRSS_ADMIN_PASSWORD": "test"
+  },
+  "assets": {
+    "directory": "../apps/web/dist",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": [
+      "/api/*",
+      "/health",
+      "/__test/*"
+    ]
+  }
+}

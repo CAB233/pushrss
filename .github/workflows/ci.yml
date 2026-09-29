@@ -1,0 +1,84 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  DENO_NO_UPDATE_CHECK: "1"
+  WRANGLER_SEND_METRICS: "false"
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9"
+          cache: true
+      - run: deno install --frozen
+      - run: |
+          cp wrangler.jsonc.example wrangler.jsonc
+          deno task verify
+
+  platform:
+    name: Platform Test
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: "2.9"
+          cache: true
+      - run: |
+          deno install --frozen
+          deno task test:platform
+
+  docker:
+    name: Docker Test
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v4
+      - name: Build image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          platforms: linux/amd64
+          load: true
+          push: false
+          tags: pushrss:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Test
+        run: |
+          trap 'docker logs pushrss-ci; docker rm -fv pushrss-ci' EXIT
+          docker run -d --name pushrss-ci -p 127.0.0.1:18000:8000 \
+            -e PUSHRSS_ADMIN_PASSWORD=ci-test \
+            -e PUSHRSS_MASTER_KEY=YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE= \
+            pushrss:ci
+          curl --fail --silent --show-error --retry 30 --retry-all-errors \
+            --retry-delay 1 --retry-max-time 60 --max-time 5 \
+            http://127.0.0.1:18000/health
+          curl --fail --silent --show-error http://127.0.0.1:18000/ | grep 'id="root"'
+          curl --fail --silent --show-error --user admin:ci-test \
+            http://127.0.0.1:18000/api/settings
+          docker exec pushrss-ci /bin/deno run -A scripts/backup.ts /data/ci-backup.db
+          docker image inspect pushrss:ci --format '镜像体积：{{.Size}} bytes'
