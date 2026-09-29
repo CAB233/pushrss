@@ -90,12 +90,7 @@ export async function verifyNotifications(r: Repositories) {
         createdAt: 0,
         updatedAt: 0,
       });
-      await r.subscriptions.add({
-        id: crypto.randomUUID(),
-        feedId: f,
-        channelId: id,
-        createdAt: 0,
-      });
+      await r.subscriptions.add({ feedId: f, channelId: id });
     }
     const item = (await r.items.insert({
       id: crypto.randomUUID(),
@@ -127,7 +122,7 @@ export async function verifyNotifications(r: Repositories) {
     equal((await r.deliveries.get(bid))?.externalMessageId, "42");
     equal(await retryDelivery(services, bid), false);
     equal((await testChannel(services, b)).ok, true);
-    equal(lastText.startsWith("【测试】&lt;b&gt;测试&lt;/b&gt;"), true);
+    equal(lastText.startsWith("PushRSS测试通知"), true);
     // 新文章验证重试上限和手动重试。
     const item2 = (await r.items.insert({
       id: crypto.randomUUID(),
@@ -138,7 +133,7 @@ export async function verifyNotifications(r: Repositories) {
       createdAt: 0,
     }))!;
     equal((await testChannel(services, b)).ok, true);
-    equal(lastText.startsWith("【测试】测试"), true);
+    equal(lastText.startsWith("PushRSS测试通知"), true);
     const retryIds = await dispatchItems(services, [item2]);
     const target = (await Promise.all(retryIds.map((id) =>
       r.deliveries.get(id)

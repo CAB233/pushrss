@@ -14,10 +14,7 @@ export async function handleJob(
     await sendDelivery(services, job.deliveryId);
     return;
   }
-  const result = await fetchFeed(services.repositories, job.feedId, {
-    ...options,
-    latestOnly: job.latestOnly,
-  });
+  const result = await fetchFeed(services.repositories, job.feedId, options);
   if (result.status === "failed") throw new Error("Feed 任务执行失败");
   if (result.status === "updated") {
     await dispatchItems(services, result.notificationItems);

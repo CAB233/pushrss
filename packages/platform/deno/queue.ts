@@ -32,16 +32,20 @@ export function createQueue(
       `INSERT OR IGNORE INTO jobs(id,type,payload,available_at,created_at,updated_at) VALUES(?,?,?,?,?,?)`,
     ).run(crypto.randomUUID(), job.type, JSON.stringify(job), at, now(), now());
   }
+  function schedule(job: Job, at: number) {
+    insert(job, at);
+    client.prepare(
+      "UPDATE jobs SET available_at=min(available_at,?),updated_at=? WHERE type=? AND status='pending' AND coalesce(json_extract(payload,'$.feedId'),json_extract(payload,'$.deliveryId'))=?",
+    ).run(
+      at,
+      now(),
+      job.type,
+      job.type === "fetch_feed" ? job.feedId : job.deliveryId,
+    );
+  }
   const queue: JobQueue = {
     enqueue(job, at = now()) {
-      transaction(() => {
-        insert(job, at);
-        if (job.type === "fetch_feed" && job.latestOnly) {
-          client.prepare(
-            "UPDATE jobs SET payload=json_set(payload,'$.latestOnly',json('true')),available_at=min(available_at,?),updated_at=? WHERE type='fetch_feed' AND status='pending' AND json_extract(payload,'$.feedId')=?",
-          ).run(at, now(), job.feedId);
-        }
-      });
+      transaction(() => schedule(job, at));
       return Promise.resolve();
     },
   };
@@ -193,10 +197,11 @@ export function createQueue(
           assertActive: () => transaction(() => owns(c)),
           queue: {
             enqueue(job, at) {
-              return transaction(() => {
+              transaction(() => {
                 owns(c);
-                return queue.enqueue(job, at);
+                schedule(job, at ?? now());
               });
+              return Promise.resolve();
             },
           },
           now,

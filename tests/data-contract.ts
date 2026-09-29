@@ -17,6 +17,7 @@ export async function verifyRepositories(r: Repositories) {
   const prefix = crypto.randomUUID();
   const f = prefix + "f",
     g = prefix + "g",
+    h = prefix + "h",
     c = prefix + "c",
     d = prefix + "d",
     i = prefix + "i";
@@ -41,6 +42,20 @@ export async function verifyRepositories(r: Repositories) {
       updatedAt: 2,
     });
     equal((await r.feeds.get(f))?.createdAt, 1);
+    await r.feeds.save({
+      id: h,
+      url: "https://example.com/" + h,
+      title: "待抓取",
+      nextFetchAt: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    });
+    await r.feeds.updateFetch(f, { lastFetchedAt: 10, lastError: null });
+    await r.feeds.updateFetch(g, { lastError: "抓取失败" });
+    equal((await r.feeds.list(3, 0)).map((feed) => feed.id), [f, g, h]);
+    equal((await r.feeds.list(2, 0)).map((feed) => feed.id), [f, g]);
+    equal((await r.feeds.list(1, 2)).map((feed) => feed.id), [h]);
+    await r.feeds.remove(h);
     equal(
       (await r.feeds.due(1)).filter((x) => [f, g].includes(x.id)).length,
       2,
@@ -67,19 +82,9 @@ export async function verifyRepositories(r: Repositories) {
       });
     }
     for (const channelId of [c, d]) {
-      await r.subscriptions.add({
-        id: prefix + channelId,
-        feedId: f,
-        channelId,
-        createdAt: 1,
-      });
+      await r.subscriptions.add({ feedId: f, channelId });
     }
-    await r.subscriptions.add({
-      id: prefix + "duplicate",
-      feedId: f,
-      channelId: c,
-      createdAt: 1,
-    });
+    await r.subscriptions.add({ feedId: f, channelId: c });
     equal((await r.subscriptions.channelsForFeed(f)).length, 2);
     equal(
       JSON.stringify(publicChannel((await r.channels.get(c))!)).includes(
@@ -133,8 +138,6 @@ export async function verifyRepositories(r: Repositories) {
       updatedAt: 2,
     });
     equal((await r.deliveries.get(prefix + "delivery" + c))?.status, "sent");
-    await r.settings.set("contract", { locale: "中文" }, 1);
-    equal(await r.settings.get("contract"), { locale: "中文" });
     await r.feeds.remove(f);
     equal((await r.items.list(f)).length, 0);
     equal(await r.deliveries.get(prefix + "delivery" + c), undefined);
@@ -142,6 +145,7 @@ export async function verifyRepositories(r: Repositories) {
   } finally {
     await r.feeds.remove(f);
     await r.feeds.remove(g);
+    await r.feeds.remove(h);
     await r.channels.remove(c);
     await r.channels.remove(d);
   }

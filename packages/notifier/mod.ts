@@ -3,7 +3,44 @@ import type {
   NotificationMessage,
   Notifier,
 } from "../shared/contracts.ts";
-export type ChannelType = "serverchan" | "telegram";
+export const CHANNEL_TYPES = [
+  "serverchan",
+  "telegram",
+  "webhook",
+  "slack",
+  "discord",
+  "feishu",
+  "dingtalk",
+  "wecom",
+] as const;
+export type ChannelType = typeof CHANNEL_TYPES[number];
+export interface WebhookConfig {
+  target: string;
+}
+export function publicUrl(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error("请输入有效的 HTTP 或 HTTPS 地址");
+  }
+  const host = url.hostname.toLowerCase().replace(/^\[|\]$/g, "").replace(
+    /\.$/,
+    "",
+  );
+  if (
+    !["https:", "http:"].includes(url.protocol) || url.username ||
+    url.password ||
+    (host === "localhost" || host.endsWith(".localhost") ||
+      /^(127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[01])\.)/.test(
+        host,
+      ) || (host.includes(":") && /^(::|fc|fd|fe[89ab])/i.test(host))) ||
+    host.endsWith(".local") || host.endsWith(".internal")
+  ) {
+    throw new Error("请使用公开的 HTTP 或 HTTPS 地址");
+  }
+  return url.href;
+}
 export interface ServerchanConfig {
   sendKey: string;
 }
@@ -22,7 +59,7 @@ function object(value: unknown): Record<string, unknown> {
 export function validateConfig(
   type: ChannelType,
   value: unknown,
-): ServerchanConfig | TelegramConfig {
+): ServerchanConfig | TelegramConfig | WebhookConfig {
   const c = object(value);
   if (
     type === "serverchan" && typeof c.sendKey === "string" &&
@@ -45,6 +82,12 @@ export function validateConfig(
       parseMode: c.parseMode as TelegramConfig["parseMode"],
       disablePreview: c.disablePreview as boolean | undefined,
     };
+  }
+  if (
+    CHANNEL_TYPES.includes(type) && type !== "serverchan" &&
+    type !== "telegram" && typeof c.target === "string"
+  ) {
+    return { target: publicUrl(c.target) };
   }
   throw new Error("渠道配置无效");
 }
@@ -84,7 +127,7 @@ export function createNotifiers(
     config: unknown,
     message: NotificationMessage,
   ): Promise<DeliveryResult> {
-    let c: ServerchanConfig | TelegramConfig;
+    let c: ServerchanConfig | TelegramConfig | WebhookConfig;
     try {
       c = validateConfig(type, config);
     } catch {
@@ -101,6 +144,35 @@ export function createNotifiers(
         title: message.title,
         desp: [message.body, message.url].filter(Boolean).join("\n\n"),
       };
+    } else if ("target" in c) {
+      url = c.target;
+      const plain = [
+        `【${message.feedTitle ?? "PushRSS"}】${message.title}`,
+        message.url,
+      ].filter(Boolean).join("\n");
+      switch (type) {
+        case "slack":
+          payload = { text: plain };
+          break;
+        case "discord":
+          payload = { content: plain.slice(0, 2000) };
+          break;
+        case "feishu":
+          payload = { msg_type: "text", content: { text: plain } };
+          break;
+        case "dingtalk":
+        case "wecom":
+          payload = { msgtype: "text", text: { content: plain } };
+          break;
+        default:
+          payload = {
+            feed: message.feedTitle ?? "PushRSS",
+            title: message.title,
+            link: message.url ?? "",
+            summary: message.body,
+            publishedAt: message.publishedAt ?? null,
+          };
+      }
     } else {
       // 先按 UTF-16 长度截断，再转义；保留单次投递语义。
       let safe = text.slice(0, 4000).replace(/[\uD800-\uDBFF]$/, "");
@@ -144,7 +216,9 @@ export function createNotifiers(
       try {
         data = object(await response.json());
       } catch { /* 根据 HTTP 状态判定 */ }
-      const code = type === "telegram" ? data.error_code : data.code;
+      const code = type === "telegram"
+        ? data.error_code
+        : data.code ?? data.errcode ?? data.StatusCode;
       const limited = response.status === 429 || code === 429;
       if (limited) {
         const raw = object(data.parameters).retry_after ??
@@ -163,6 +237,13 @@ export function createNotifiers(
         return failure("通知服务异常，发送结果未知", false, "unknown");
       }
       if (!response.ok) return failure(`通知服务 HTTP ${response.status}`);
+      if (["webhook", "slack", "discord"].includes(type)) return { ok: true };
+      if (["feishu", "dingtalk", "wecom"].includes(type)) {
+        if (code === 0) return { ok: true };
+        return typeof code === "number"
+          ? failure("通知渠道拒绝请求")
+          : failure("通知响应无效，发送结果未知", false, "unknown");
+      }
       if (type === "serverchan" && code === 0) return { ok: true };
       const result = object(data.result);
       if (
@@ -193,5 +274,11 @@ export function createNotifiers(
   return {
     serverchan: { send: (c, m) => send("serverchan", c, m) },
     telegram: { send: (c, m) => send("telegram", c, m) },
+    webhook: { send: (c, m) => send("webhook", c, m) },
+    slack: { send: (c, m) => send("slack", c, m) },
+    discord: { send: (c, m) => send("discord", c, m) },
+    feishu: { send: (c, m) => send("feishu", c, m) },
+    dingtalk: { send: (c, m) => send("dingtalk", c, m) },
+    wecom: { send: (c, m) => send("wecom", c, m) },
   };
 }

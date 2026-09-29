@@ -1,3 +1,5 @@
+let liveFeeds: Record<string, string> = {};
+import { verifyRelay } from "./relay-contract.ts";
 import { verifyApi } from "./api-contract.ts";
 import { verifyNotifierProtocol } from "./notifier-contract.ts";
 import { verifyNotifications } from "./notification-contract.ts";
@@ -12,13 +14,14 @@ import type {
 } from "../packages/platform/cloudflare/bindings.ts";
 import { createWorker } from "../packages/platform/cloudflare/main.ts";
 import { inspectFeed } from "../packages/core/mod.ts";
-function liveWorker(env: WorkerEnv & { DB: D1Binding }) {
-  const repositories = createD1Repositories(env.DB);
+function liveWorker() {
   return createWorker({
-    fetch: async (url) => {
+    fetch: (url) => {
       const format = String(url).includes("atom") ? "atom" : "rss";
-      return new Response(
-        String(await repositories.settings.get("live-" + format)),
+      return Promise.resolve(
+        new Response(
+          liveFeeds[format] ?? "",
+        ),
       );
     },
     notifiers: {
@@ -43,6 +46,7 @@ export default {
       await verifyNotifications(repositories);
       await verifyNotifierProtocol();
       await verifyApi(repositories);
+      await verifyRelay(repositories);
       await verifyCloudflare(env.DB);
       const { rss, atom } = await request.json() as {
         rss: string;
@@ -55,18 +59,28 @@ export default {
       return Response.json(inspectFeed(await request.text()));
     }
     if (new URL(request.url).pathname === "/__test/live/setup") {
-      const data = await request.json() as { rss: string; atom: string };
+      const data = await request.json() as {
+        rss: string;
+        atom: string;
+        due?: boolean;
+      };
       const r = createD1Repositories(env.DB);
-      await r.settings.set("live-rss", data.rss, Date.now());
-      await r.settings.set("live-atom", data.atom, Date.now());
+      liveFeeds = { rss: data.rss, atom: data.atom };
+      if (data.due) {
+        for (const feed of await r.feeds.list(500)) {
+          if (feed.url.startsWith("https://live.example/")) {
+            await r.feeds.edit(feed.id, { nextFetchAt: Date.now() });
+          }
+        }
+      }
       return Response.json({ ok: true });
     }
-    return liveWorker(env).fetch(request, env);
+    return liveWorker().fetch(request, env);
   },
   async scheduled(event: unknown, env: WorkerEnv & { DB: D1Binding }) {
-    await liveWorker(env).scheduled(event, env);
+    await liveWorker().scheduled(event, env);
   },
   async queue(batch: QueueBatch, env: WorkerEnv & { DB: D1Binding }) {
-    await liveWorker(env).queue(batch, env);
+    await liveWorker().queue(batch, env);
   },
 };

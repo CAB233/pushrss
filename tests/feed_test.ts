@@ -3,7 +3,7 @@ import { migrate } from "../packages/platform/deno/migrate.ts";
 import { createRepositories } from "../packages/db/repositories.ts";
 import { verifyFeeds } from "./feed-contract.ts";
 import { testMigrations } from "./migrations.ts";
-Deno.test("Feed 标准化、指纹、条件抓取、首次推送、地址变更与失败恢复", async () => {
+Deno.test("Feed 标准化、指纹、条件抓取、首次基线、地址变更与失败恢复", async () => {
   const c = openDatabase(":memory:");
   try {
     migrate(c.client, await testMigrations());

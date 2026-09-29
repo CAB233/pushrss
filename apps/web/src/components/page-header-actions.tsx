@@ -34,7 +34,7 @@ function HeaderIconButton({
       {...buttonProps}
       type="button"
       data-slot="button"
-      variant="outline"
+      variant="ghost"
       size="icon"
       aria-label={label}
       title={label}
@@ -129,7 +129,7 @@ export function PageHeaderActions({
 }): JSX.Element {
   const { t } = useTranslation();
   return (
-    <div className="actions">
+    <div className="page-header-actions">
       <LanguageAction />
       <ThemeAction />
       <HeaderIconButton

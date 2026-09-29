@@ -76,8 +76,7 @@ export async function verifyFeeds(
     const first = await run();
     if (first.status !== "updated") throw new Error("首次抓取失败");
     equal(first.added.length, 4);
-    equal(first.notificationItems.length, 1);
-    equal(first.notificationItems[0].title, "标题 & 测试");
+    equal(first.notificationItems.length, 0);
     equal(first.initial, true);
     equal(headers.has("if-none-match"), false);
     equal((await repos.feeds.get(id))?.title, "自定义标题");
@@ -118,7 +117,7 @@ export async function verifyFeeds(
     const second = await fetchFeed(repos, other, { fetch: mock, now });
     if (second.status !== "updated") throw new Error("第二个 Feed 失败");
     equal(second.added.length, 2);
-    equal(second.notificationItems.length, 1);
+    equal(second.notificationItems.length, 0);
     equal(second.initial, true);
     equal((await repos.feeds.get(other))?.title, b.title);
     response = () =>
@@ -131,11 +130,10 @@ export async function verifyFeeds(
     const manual = await fetchFeed(repos, other, {
       fetch: mock,
       now,
-      latestOnly: true,
     });
     if (manual.status !== "updated") throw new Error("手动刷新失败");
     equal(manual.added.length, 2);
-    equal(manual.notificationItems.map((item) => item.title), ["最新"]);
+    equal(manual.notificationItems.map((item) => item.title), ["较早", "最新"]);
     equal((await repos.feeds.get(other))?.title, b.title);
     response = () =>
       new Response(
@@ -234,7 +232,7 @@ export async function verifyFeeds(
     if (moved.status !== "updated") throw new Error("新地址抓取失败");
     // 相对链接会按新地址解析为新链接；GUID 相同的历史条目继续去重。
     equal(moved.added.length, 1);
-    equal(moved.notificationItems.length, 1);
+    equal(moved.notificationItems.length, 0);
     const movedRepeat = await run();
     if (movedRepeat.status !== "updated") throw new Error("新地址重复抓取失败");
     equal(movedRepeat.added.length, 0);

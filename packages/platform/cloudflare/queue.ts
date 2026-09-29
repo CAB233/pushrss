@@ -47,14 +47,13 @@ export function createCloudflareQueue(
         now(),
         now(),
       ),
-      ...(job.type === "fetch_feed" && job.latestOnly
-        ? [stmt(
-          "UPDATE jobs SET payload=json_set(payload,'$.latestOnly',json('true')),available_at=min(available_at,?),updated_at=? WHERE type='fetch_feed' AND status='pending' AND json_extract(payload,'$.feedId')=?",
-          at,
-          now(),
-          job.feedId,
-        )]
-        : []),
+      stmt(
+        "UPDATE jobs SET available_at=min(available_at,?),updated_at=? WHERE type=? AND status='pending' AND coalesce(json_extract(payload,'$.feedId'),json_extract(payload,'$.deliveryId'))=?",
+        at,
+        now(),
+        job.type,
+        target(job),
+      ),
       stmt(
         "SELECT id,status,available_at FROM jobs WHERE type=? AND coalesce(json_extract(payload,'$.feedId'),json_extract(payload,'$.deliveryId'))=? AND status IN ('pending','running')",
         job.type,

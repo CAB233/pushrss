@@ -1,7 +1,6 @@
 # PushRSS
 
-PushRSS 是面向个人使用的 RSS 推送服务，支持Server酱³ 和 Telegram Bot
-通知渠道，且服务可运行在 Docker 或 Cloudflare Workers。
+PushRSS 是面向个人使用的 RSS 推送服务，支持多种通知渠道，且服务可运行在 Docker 或 Cloudflare Workers。
 
 ## Docker 部署
 
@@ -116,7 +115,7 @@ deno task dev:worker
 `.dev.vars` 已加入 Git 忽略规则。
 
 管理界面使用密码登录，并通过 HttpOnly、SameSite=Strict 的签名 Cookie
-保留 7 天会话；刷新页面后自动恢复，点击“退出”会清除浏览器会话。HTTPS
+保留 7 天会话；刷新页面后自动恢复。HTTPS
 访问时 Cookie 使用 Secure 属性，修改管理密码或主密钥会使已有会话失效。管理 API
 继续接受 Basic 认证（用户名为 `admin`），旧客户端可使用以密码为值的 Bearer
 认证。`GET /health` 可直接用于存活检查。
@@ -132,4 +131,12 @@ mkdir -p backups
 stamp=$(date -u +%Y%m%dT%H%M%SZ)
 deno task db:backup "backups/pushrss-$stamp.db"
 cp .env "backups/pushrss-$stamp.env"
+```
+
+## 工程检查
+
+```sh
+deno task verify         # 格式、静态检查、类型检查、契约测试与两端构建
+deno task test:web       # 浏览器验收：登录、表单、渠道、刷新、路由和手机布局
+deno task test:platform  # Deno SQLite 与 Workers D1 / Queues / Cron
 ```

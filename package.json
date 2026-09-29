@@ -5,6 +5,7 @@
   "dependencies": {
     "@feed/parser": "npm:@jsr/feed__parser@^1.0.1",
     "@tailwindcss/vite": "4.3.3",
+    "@tanstack/react-table": "8.21.3",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "hono": "4.13.8",
@@ -21,7 +22,9 @@
     "react": "19.2.0",
     "react-dom": "19.2.0",
     "@types/react": "19.2.0",
-    "@types/react-dom": "19.2.0"
+    "@types/react-dom": "19.2.0",
+    "swr": "2.5.1",
+    "sonner": "2.0.8"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0"

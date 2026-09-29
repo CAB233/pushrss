@@ -192,11 +192,22 @@ function authors(value: unknown): string | null {
 export interface ParsedFeed {
   format: "rss" | "atom";
   title: string;
+  siteUrl: string;
   items: FeedItem[];
 }
 
 /** 通过 @feed/parser 解析 Feed XML，再映射到 PushRSS 的标准文章模型。 */
 export function parseFeed(xml: string, sourceUrl?: string): ParsedFeed {
+  if (/<!DOCTYPE/i.test(xml)) throw new Error("Feed XML 格式无效");
+  if (/<(?:rdf:)?RDF\b/i.test(xml)) {
+    const channel = /<channel\b[^>]*>([\s\S]*?)<\/channel\s*>/i.exec(xml);
+    const items = Array.from(
+      xml.matchAll(/<item\b[^>]*>[\s\S]*?<\/item\s*>/gi),
+      (match) => match[0],
+    ).join("");
+    if (!channel) throw new Error("Feed RDF 格式无效");
+    xml = `<rss version="2.0"><channel>${channel[1]}${items}</channel></rss>`;
+  }
   const prepared = prepareXml(xml);
   const parsed = parseSyndicationFeed(prepared.xml);
   if (parsed.format === "json") throw new Error("仅支持 RSS 与 Atom");
@@ -213,6 +224,14 @@ export function parseFeed(xml: string, sourceUrl?: string): ParsedFeed {
   return {
     format: parsed.format,
     title: prepared.feedTitleMissing ? "" : text(parsed.title) ?? "",
+    siteUrl: resolveUrl(
+      isRss ? rawFeed.link : node(
+        array(rawFeed.link).find((link) =>
+          !node(link)["@_rel"] || node(link)["@_rel"] === "alternate"
+        ),
+      )["@_href"],
+      rootBase,
+    ) ?? "",
     items: parsed.items.map((item, index): FeedItem => {
       const rawItem = node(rawItems[index]);
       const itemBase = baseOf(rawItem, rootBase);

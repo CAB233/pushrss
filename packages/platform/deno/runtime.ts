@@ -8,6 +8,7 @@ import { createQueue } from "./queue.ts";
 import { runScheduler } from "./scheduler.ts";
 export async function createRuntime(
   config: { databasePath: string; masterKey: string; adminPassword: string },
+  options: { fetch?: typeof globalThis.fetch } = {},
 ) {
   if (!config.adminPassword.trim()) {
     throw new Error("请设置非空的 PUSHRSS_ADMIN_PASSWORD");
@@ -34,6 +35,7 @@ export async function createRuntime(
       repositories: createRepositories(db.db),
       secrets,
       queue,
+      fetch: options.fetch,
       adminPassword: config.adminPassword,
       sessionSecret: sessionSigningSecret(
         config.masterKey,
@@ -48,7 +50,7 @@ export async function createRuntime(
           let i = 0;
           i < 20 && !controller.signal.aborted;
           i++
-        ) if (!await queue.consume({ secrets })) break;
+        ) if (!await queue.consume({ secrets }, options)) break;
       },
       1000,
       controller.signal,

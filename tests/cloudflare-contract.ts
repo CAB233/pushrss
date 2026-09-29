@@ -1,3 +1,5 @@
+import { createSecretStore } from "../packages/core/secrets.ts";
+import { retryDelivery } from "../packages/core/notifications.ts";
 import type {
   D1Binding,
   QueueEnvelope,
@@ -10,8 +12,9 @@ import { passwordAuthorization } from "../packages/shared/auth.ts";
 import { equal, rejects } from "./data-contract.ts";
 export async function verifyCloudflare(db: D1Binding) {
   const r = createD1Repositories(db);
+  const testSecrets = createSecretStore(btoa("a".repeat(32)));
   let time = 100000;
-  let sends = 0;
+  let sends = 0, version = 0;
   let unavailable = false;
   const messages: QueueEnvelope[] = [];
   const env = {
@@ -38,7 +41,7 @@ export async function verifyCloudflare(db: D1Binding) {
     fetch: () =>
       Promise.resolve(
         new Response(
-          "<rss><channel><title>测试</title><item><guid>cf-1</guid><title>文章</title></item></channel></rss>",
+          `<rss><channel><title>测试</title><item><guid>cf-${version}</guid><title>文章</title></item></channel></rss>`,
         ),
       ),
     notifiers: {
@@ -116,19 +119,18 @@ export async function verifyCloudflare(db: D1Binding) {
     })).text(),
     "asset",
   );
-  const feed = await (await api("/feeds", "POST", {
-    url: "https://cf-contract.example/rss",
-    intervalSeconds: 60,
-  })).json();
   const channel = await (await api("/channels", "POST", {
     name: "Cloudflare 测试",
     type: "telegram",
-    config: { botToken: "123:test", chatId: "123" },
+    token: "123:test",
+    target: "123",
   })).json();
-  await api("/subscriptions", "POST", {
-    feedId: feed.id,
-    channelId: channel.id,
-  });
+  const feed = await (await api("/feeds", "POST", {
+    url: "https://cf-contract.example/rss",
+    channelIds: [channel.id],
+  })).json();
+  version = 1;
+  await r.feeds.edit(feed.id, { nextFetchAt: time });
   const notify = (body: unknown) => {
     let ack = 0, retry = 0;
     const message: QueueMessage = {
@@ -156,7 +158,7 @@ export async function verifyCloudflare(db: D1Binding) {
     await Promise.all(
       pair.map((m) => runtime.consume({ messages: [m.message] })),
     );
-    equal((await r.items.list(feed.id)).length, 1);
+    equal((await r.items.list(feed.id)).length, 2);
     equal(
       (await r.deliveries.list()).filter((d) => d.channelId === channel.id)
         .length,
@@ -199,15 +201,24 @@ export async function verifyCloudflare(db: D1Binding) {
     await runtime.scheduled();
     equal((await r.deliveries.get(delivery.id))?.status, "failed");
     await rejects(() =>
-      runtime.queue.repositories(old).settings.set("stale-write", true, time)
+      runtime.queue.repositories(old).feeds.edit(feed.id, {
+        title: "stale-write",
+      })
     );
-    equal(await r.settings.get("stale-write"), undefined);
+    equal((await r.feeds.get(feed.id))?.title, "测试");
     await rejects(() => runtime.queue.finish(old));
     await drain();
     equal(sends, 2);
     // 手动重试的持久化任务在传输失败后由 Cron 补发。
     unavailable = true;
-    equal((await api(`/deliveries/${delivery.id}/retry`, "POST")).status, 500);
+    await rejects(async () =>
+      retryDelivery({
+        repositories: r,
+        secrets: await testSecrets,
+        queue: runtime.queue,
+        now: () => time,
+      }, delivery.id)
+    );
     unavailable = false;
     await runtime.scheduled();
     await drain();
@@ -255,14 +266,14 @@ export async function verifyCloudflare(db: D1Binding) {
       time + 10000,
     );
     await runtime.queue.enqueue(
-      { type: "fetch_feed", feedId: "manual-probe", latestOnly: true },
+      { type: "fetch_feed", feedId: "manual-probe" },
       time,
     );
     const manualRows = await db.prepare(
       "SELECT payload,available_at FROM jobs WHERE type='fetch_feed' AND json_extract(payload,'$.feedId')='manual-probe' AND status='pending'",
     ).raw();
     equal(manualRows.length, 1);
-    equal(JSON.parse(String(manualRows[0][0])).latestOnly, true);
+    equal(JSON.parse(String(manualRows[0][0])).feedId, "manual-probe");
     equal(manualRows[0][1], time);
     await db.prepare(
       "DELETE FROM jobs WHERE type='fetch_feed' AND json_extract(payload,'$.feedId')='manual-probe'",

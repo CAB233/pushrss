@@ -11,6 +11,8 @@ export interface FeedItem {
 export interface NotificationMessage {
   title: string;
   body: string;
+  feedTitle?: string;
+  publishedAt?: string | null;
   url?: string;
 }
 export type DeliveryResult = { ok: true; externalMessageId?: string } | {
@@ -21,7 +23,7 @@ export type DeliveryResult = { ok: true; externalMessageId?: string } | {
   retryAfterSeconds?: number;
 };
 export type Job =
-  | { type: "fetch_feed"; feedId: string; latestOnly?: boolean }
+  | { type: "fetch_feed"; feedId: string }
   | {
     type: "send_notification";
     deliveryId: string;

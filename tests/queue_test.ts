@@ -65,11 +65,11 @@ Deno.test("持久队列：双连接领取、延迟、租约恢复、旧执行者
     );
     await q.enqueue({ type: "fetch_feed", feedId: "manual" }, time + 10000);
     await q.enqueue(
-      { type: "fetch_feed", feedId: "manual", latestOnly: true },
+      { type: "fetch_feed", feedId: "manual" },
       time,
     );
     const manual = q.claim();
-    assert(manual?.job.type === "fetch_feed" && manual.job.latestOnly);
+    assert(manual?.job.type === "fetch_feed");
     q.finish(manual);
     time += 31 * 86400000;
     q.recover();
@@ -80,7 +80,7 @@ Deno.test("持久队列：双连接领取、延迟、租约恢复、旧执行者
     await Deno.remove(dir, { recursive: true });
   }
 });
-Deno.test("持久化抓取投递：首次推送、崩溃补偿、限流续投、启停、周期及失败隔离", async () => {
+Deno.test("持久化抓取投递：首次基线、崩溃补偿、限流续投、启停、周期及失败隔离", async () => {
   const c = openDatabase(":memory:");
   try {
     migrate(c.client, await testMigrations());
@@ -108,12 +108,7 @@ Deno.test("持久化抓取投递：首次推送、崩溃补偿、限流续投、
         updatedAt: time,
       });
     }
-    await r.subscriptions.add({
-      id: "sub",
-      feedId: "feed",
-      channelId: "channel",
-      createdAt: time,
-    });
+    await r.subscriptions.add({ feedId: "feed", channelId: "channel" });
     let version = 1, sends = 0;
     const services = {
       secrets,
@@ -158,10 +153,21 @@ Deno.test("持久化抓取投递：首次推送、崩溃补偿、限流续投、
     for (let i = 0; i < 4; i++) await q.consume(services, options);
     assert((await r.feeds.get("bad"))?.failureCount === 1);
     assert((await r.items.list("feed")).length === 1);
+    assert((await r.deliveries.list()).length === 0);
+    version = 2;
+    await q.enqueue({ type: "fetch_feed", feedId: "feed" }, time);
+    for (let i = 0; i < 4; i++) await q.consume(services, options);
     assert((await r.deliveries.list()).length === 1);
+    assert(Number(sends) === 1, "抓取任务应直接入队并消费通知任务");
+    assert(
+      !c.client.prepare(
+        "SELECT id FROM jobs WHERE json_extract(payload,'$.feedId')='feed' AND last_error IS NOT NULL",
+      ).get(),
+      "正常任务应完成事务与入队",
+    );
     await r.feeds.edit("bad", { enabled: false });
     time += 60000;
-    version = 1;
+    version = 2;
     q.recover();
     for (let i = 0; i < 3; i++) {
       await q.consume(services, options);
@@ -243,15 +249,17 @@ Deno.test("Deno 服务组装：迁移、认证、持久 API 与正常关闭后�
     let runtime = await createRuntime(config);
     let id: string;
     try {
-      const response = await runtime.app.request("/api/feeds", {
+      const response = await runtime.app.request("/api/channels", {
         method: "POST",
         headers: {
           Authorization: "Bearer " + config.adminPassword,
           "content-type": "application/json",
         },
         body: JSON.stringify({
-          url: "https://disabled.example/rss",
-          enabled: false,
+          name: "重启测试",
+          type: "telegram",
+          target: "123",
+          token: "123:test",
         }),
       });
       assert(response.status === 201);
@@ -262,9 +270,9 @@ Deno.test("Deno 服务组装：迁移、认证、持久 API 与正常关闭后�
     runtime = await createRuntime(config);
     try {
       assert(
-        (await runtime.app.request("/api/feeds/" + id, {
+        (await (await runtime.app.request("/api/channels", {
           headers: { Authorization: "Bearer " + config.adminPassword },
-        })).status === 200,
+        })).json()).some((channel: { id: string }) => channel.id === id),
       );
     } finally {
       await runtime.close();

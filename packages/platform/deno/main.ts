@@ -1,7 +1,9 @@
 import { createApp } from "../../../apps/server/src/app.ts";
 import { createRuntime } from "./runtime.ts";
 import { createAssetHandler } from "./assets.ts";
-if (import.meta.main) {
+export async function runServer(
+  options: { fetch?: typeof globalThis.fetch } = {},
+) {
   const token = Deno.env.get("PUSHRSS_ADMIN_PASSWORD") ??
     Deno.env.get("PUSHRSS_ADMIN_TOKEN");
   const key = Deno.env.get("PUSHRSS_MASTER_KEY");
@@ -10,7 +12,7 @@ if (import.meta.main) {
       adminPassword: token,
       masterKey: key,
       databasePath: Deno.env.get("DATABASE_PATH") ?? "pushrss.db",
-    })
+    }, options)
     : undefined;
   const app = runtime?.app ?? createApp("deno");
   const assetDirectory = Deno.env.get("PUSHRSS_WEB_DIR");
@@ -40,3 +42,4 @@ if (import.meta.main) {
   Deno.removeSignalListener("SIGINT", stop);
   Deno.removeSignalListener("SIGTERM", stop);
 }
+if (import.meta.main) await runServer();

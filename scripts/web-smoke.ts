@@ -1,77 +1,45 @@
-import { handleJob } from "../packages/core/jobs.ts";
-import type { ApiServices } from "../apps/server/src/app.ts";
-/** 真实浏览器 + Hono / SQLite；Feed 与通知服务使用固定数据。 */
-import { chromium, expect, type Page as BrowserPage } from "@playwright/test";
+/** rss 页面浏览器验收：同源登录、样例表单、列表、卡片与路由，模拟出站请求。 */
+import { chromium, expect } from "@playwright/test";
+import { type ApiServices, createApp } from "../apps/server/src/app.ts";
 import { openDatabase } from "../packages/platform/deno/sqlite.ts";
 import { migrate } from "../packages/platform/deno/migrate.ts";
 import { createRepositories } from "../packages/db/repositories.ts";
 import { createSecretStore } from "../packages/core/secrets.ts";
 import { sessionSigningSecret } from "../packages/shared/auth.ts";
-import { createApp } from "../apps/server/src/app.ts";
+import { handleJob } from "../packages/core/jobs.ts";
+import { CHANNEL_TYPES } from "../packages/notifier/mod.ts";
+import { testMigrations } from "../tests/migrations.ts";
 import type { Job } from "../packages/shared/contracts.ts";
-async function navigate(page: BrowserPage, name: string) {
-  const mobile = (page.viewportSize()?.width ?? 1360) < 768;
-  if (mobile) await page.locator('[data-slot="sidebar-trigger"]').click();
-  await page.getByRole("navigation").getByRole("button", { name, exact: true })
-    .click();
-  if (mobile) await expect(page.locator('[data-mobile="true"]')).toHaveCount(0);
-}
-async function selectLanguage(
-  page: BrowserPage,
-  label: string,
-  option: string,
-) {
-  await page.getByRole("button", { name: label, exact: true }).click();
-  await page.getByRole("menuitemradio", { name: option, exact: true }).click();
-  await expect(page.locator('[data-slot="dropdown-menu-content"]')).toHaveCount(
-    0,
-  );
-}
+
 const database = openDatabase(":memory:");
-for (
-  const name of [
-    "0001_initial.sql",
-    "0002_queue.sql",
-    "0003_initial_notifications.sql",
-    "0004_latest_notification.sql",
-  ]
-) {
-  migrate(database.client, [{
-    name,
-    sql: await Deno.readTextFile(
-      new URL(`../packages/db/migrations/${name}`, import.meta.url),
-    ),
-  }]);
-}
-const repositories = createRepositories(database.db);
-const jobs: Job[] = [];
-let testCount = 0;
-const token = "短密码1";
+migrate(database.client, await testMigrations());
+const repositories = createRepositories(database.db), jobs: Job[] = [];
+let version = 0, sent = 0;
+const password = "样例登录密码";
+const feedXml = () =>
+  `<rss version="2.0"><channel><title>示例技术源</title><link>https://feed.example/</link><item><guid>baseline</guid><title>Deno 基线文章</title><link>https://feed.example/first</link><description>基础</description></item>${
+    version
+      ? "<item><guid>new</guid><title>Deno 新文章</title><link>https://feed.example/new</link><description>更新</description></item>"
+      : ""
+  }</channel></rss>`;
 const services: ApiServices = {
   repositories,
-  adminPassword: token,
-  sessionSecret: sessionSigningSecret(btoa("a".repeat(32)), token),
+  adminPassword: password,
+  sessionSecret: sessionSigningSecret(btoa("a".repeat(32)), password),
   secrets: await createSecretStore(btoa("a".repeat(32))),
+  fetch: (() => Promise.resolve(new Response(feedXml()))) as typeof fetch,
   queue: {
     enqueue(job) {
       jobs.push(job);
       return Promise.resolve();
     },
   },
-  notifiers: {
-    serverchan: {
-      send() {
-        testCount++;
-        return Promise.resolve({ ok: true as const });
-      },
+  notifiers: Object.fromEntries(CHANNEL_TYPES.map((type) => [type, {
+    send() {
+      sent++;
+      return Promise.resolve({ ok: true as const });
     },
-    telegram: {
-      send() {
-        testCount++;
-        return Promise.resolve({ ok: true as const });
-      },
-    },
-  },
+  }])),
 };
 const app = createApp("deno", services);
 const server = Deno.serve(
@@ -88,499 +56,158 @@ const server = Deno.serve(
       !/^\/assets\/[a-zA-Z0-9_.-]+$/.test(path)
     ) return new Response("Not found", { status: 404 });
     try {
-      const file = await Deno.readFile(
-        new URL(
-          `../apps/web/dist${path === "/" ? "/index.html" : path}`,
-          import.meta.url,
+      return new Response(
+        await Deno.readFile(
+          new URL(
+            `../apps/web/dist${path === "/" ? "/index.html" : path}`,
+            import.meta.url,
+          ),
         ),
-      );
-      return new Response(file, {
-        headers: {
-          "content-type": path.endsWith(".js")
-            ? "application/javascript"
-            : path.endsWith(".css")
-            ? "text/css"
-            : path.endsWith(".svg")
-            ? "image/svg+xml"
-            : "text/html",
+        {
+          headers: {
+            "content-type": path.endsWith(".js")
+              ? "application/javascript"
+              : path.endsWith(".css")
+              ? "text/css"
+              : path.endsWith(".svg")
+              ? "image/svg+xml"
+              : "text/html",
+          },
         },
-      });
+      );
     } catch {
       return new Response("Not found", { status: 404 });
     }
   },
 );
-const errors: string[] = [];
-const browser = await chromium.launch({ headless: true });
+const errors: string[] = [],
+  browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage({
     viewport: { width: 1360, height: 900 },
     locale: "zh-CN",
   });
-  page.on("pageerror", (e) => errors.push(e.message));
+  page.on("pageerror", (error) => errors.push(error.message));
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(`http://127.0.0.1:${server.addr.port}`);
-  await page.getByLabel("管理密码").fill(
-    "invalid-token-with-at-least-32-characters",
-  );
-  await page.getByRole("button", { name: "进入控制台" }).click();
+  await expect(page.getByText("登录 PushRSS")).toBeVisible();
+  await page.screenshot({ path: "/tmp/pushrss-relay-login.png" });
+  await page.getByLabel("管理密码").fill("wrong");
+  await page.getByRole("button", { name: "登录", exact: true }).click();
   await expect(page.getByRole("alert")).toContainText("管理密码错误");
-  await page.getByLabel("管理密码").fill(token);
-  await page.getByRole("button", { name: "进入控制台" }).click();
-  await expect(page.getByRole("heading", { name: "概览", exact: true }))
-    .toBeVisible();
-  await page.emulateMedia({ colorScheme: "light" });
-  await page.getByRole("button", { name: "主题", exact: true }).click();
-  await page.getByRole("menuitemradio", { name: "深色", exact: true }).click();
-  await expect(page.locator("html")).toHaveClass(/dark/);
+  await page.getByLabel("管理密码").fill(password);
+  await page.getByRole("button", { name: "登录", exact: true }).click();
+  await expect(page.getByRole("tab")).toHaveCount(4);
+  await expect(page.locator("header").getByRole("button")).toHaveCount(1);
+  const cookie = (await page.context().cookies()).find((c) =>
+    c.name === "pushrss_session"
+  );
+  if (!cookie?.httpOnly || cookie.sameSite !== "Strict") {
+    throw new Error("登录 Cookie 属性错误");
+  }
   await page.reload();
-  await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.getByRole("button", { name: "主题", exact: true }).click();
-  await page.getByRole("menuitemradio", { name: "浅色", exact: true }).click();
-  await expect(page.locator("html")).not.toHaveClass(/dark/);
-  await page.getByRole("button", { name: "主题", exact: true }).click();
-  await page.getByRole("menuitemradio", { name: "跟随系统", exact: true })
+  await expect(page.getByRole("tab")).toHaveCount(4);
+  await expect(page.getByText("还没有订阅源")).toBeVisible();
+  await page.getByRole("tab", { name: "推送渠道" }).click();
+  await page.getByRole("button", { name: "添加渠道", exact: true }).click();
+  const channelDialog = page.getByRole("dialog");
+  await channelDialog.getByLabel("渠道类型").click();
+  await expect(page.getByRole("option")).toHaveCount(8);
+  await page.getByRole("option", { name: "Server酱³" }).click();
+  await channelDialog.getByLabel("名称", { exact: true }).fill("Server酱测试");
+  await channelDialog.getByLabel("SendKey").fill("sctp1tBrowserSecret");
+  await channelDialog.getByRole("button", { name: "添加渠道", exact: true })
     .click();
-  await page.emulateMedia({ colorScheme: "dark" });
-  await expect(page.locator("html")).toHaveClass(/dark/);
-  await page.emulateMedia({ colorScheme: "light" });
-  await expect(page.locator("html")).not.toHaveClass(/dark/);
-  console.log("主题切换、刷新持久化与系统主题跟随通过");
-  await expect(page.getByRole("heading", { name: "运行信息" })).toBeVisible();
-  const logo = page.locator('[data-slot="sidebar-header"] img');
-  await expect(logo).toHaveAttribute(
-    "src",
-    await page.locator('link[rel="icon"]').getAttribute("href") ?? "",
-  );
-  await expect.poll(() =>
-    logo.evaluate((element: HTMLImageElement) => element.naturalWidth)
-  ).toBeGreaterThan(0);
-  const sidebar = page.locator('[data-slot="sidebar"][data-state]');
-  await expect(sidebar).toHaveAttribute("data-state", "expanded");
-  await page.locator('[data-slot="sidebar-trigger"]').click();
-  await expect(sidebar).toHaveAttribute("data-state", "collapsed");
-  await expect.poll(async () => {
-    const logoBox = await logo.boundingBox();
-    const iconBox = await page.getByRole("navigation").getByRole("button", {
-      name: "概览",
-      exact: true,
-    }).locator("svg").boundingBox();
-    if (!logoBox || !iconBox) return Infinity;
-    return Math.abs(
-      logoBox.x + logoBox.width / 2 - iconBox.x - iconBox.width / 2,
-    );
-  }).toBeLessThan(1);
-  const languageButton = page.getByRole("button", {
-    name: "页面语言",
-    exact: true,
-  });
-  const updateButton = page.getByRole("button", {
-    name: "更新数据",
-    exact: true,
-  });
-  const [languageBox, updateBox] = await Promise.all([
-    languageButton.boundingBox(),
-    updateButton.boundingBox(),
-  ]);
-  if (!languageBox || !updateBox || languageBox.x >= updateBox.x) {
-    throw new Error("页面语言按钮位置错误");
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("Server酱测试", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "发送测试", exact: true }).click();
+  await expect.poll(() => sent).toBe(1);
+  if ((await page.content()).includes("BrowserSecret")) {
+    throw new Error("凭据出现在渠道列表");
   }
-  await selectLanguage(page, "页面语言", "English");
-  await expect(page.getByRole("heading", { name: "Runtime information" }))
-    .toBeVisible();
-  await selectLanguage(page, "Page language", "简体中文");
+  await page.getByRole("tab", { name: "订阅源" }).click();
+  await page.getByRole("button", { name: "添加订阅源", exact: true }).click();
+  const feedDialog = page.getByRole("dialog");
+  await feedDialog.getByLabel("订阅地址").fill("https://feed.example/rss");
+  await feedDialog.getByRole("button", { name: "检测", exact: true }).click();
+  await expect(feedDialog.getByLabel("名称", { exact: true })).toHaveValue(
+    "示例技术源",
+  );
+  await feedDialog.getByLabel("分类", { exact: true }).fill("技术");
+  await feedDialog.getByLabel("关键词过滤").fill("Deno，Workers");
+  await feedDialog.getByRole("checkbox").check();
+  await feedDialog.getByRole("button", { name: "添加并抓取", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByText("示例技术源", { exact: true })).toBeVisible();
+  if (jobs.length !== 0 || sent !== 1) throw new Error("首次抓取基线策略错误");
+  await page.getByRole("button", { name: /示例技术源 技术/ }).click();
+  await expect(page.getByRole("link", { name: "Deno 基线文章" })).toBeVisible();
+  version = 1;
+  await page.getByRole("button", { name: "立即抓取", exact: true }).click();
+  await expect.poll(() => jobs.length).toBe(1);
+  while (jobs.length) {
+    await handleJob(services, jobs.shift()!, { fetch: services.fetch });
+  }
+  await expect.poll(() => sent).toBe(2);
+  await expect(page.getByRole("link", { name: "Deno 新文章" })).toBeVisible({
+    timeout: 10000,
+  });
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(feedDialog.getByLabel("订阅地址")).toBeDisabled();
+  await expect(feedDialog.getByLabel("关键词过滤")).toHaveValue(
+    "Deno，Workers",
+  );
+  await feedDialog.getByLabel("分类", { exact: true }).fill("开发");
+  await feedDialog.getByRole("button", { name: "保存", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await page.getByLabel("搜索订阅源").fill("no-match");
+  await expect(page.getByText("没有匹配的订阅源")).toBeVisible();
+  await page.getByLabel("搜索订阅源").fill("");
   await page.screenshot({
-    path: "/tmp/pushrss-sidebar-collapsed.png",
+    path: "/tmp/pushrss-relay-desktop.png",
     fullPage: true,
   });
-  await navigate(page, "设置");
-  await expect(page.getByRole("heading", { name: "设置", exact: true }))
-    .toBeVisible();
-  await expect(page.getByRole("heading", { name: "运行信息" })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "页面语言" })).toBeVisible();
-  await page.keyboard.press("Control+b");
-  await expect(sidebar).toHaveAttribute("data-state", "expanded");
-  await navigate(page, "通知渠道");
-  await page.getByRole("button", { name: "添加通知渠道" }).click();
-  let dialog = page.getByRole("dialog");
-  await dialog.getByLabel("渠道名称").fill("浏览器测试渠道");
-  await dialog.getByLabel("SendKey").fill("sctp123tBrowserTest");
-  await dialog.getByRole("button", { name: "保存渠道" }).click();
-  await expect(dialog).toHaveCount(0);
-  await page.getByRole("button", { name: "发送测试通知" }).click();
-  await expect(page.getByRole("status")).toContainText("测试通知已发送");
-  if (testCount !== 1) throw new Error("测试通知调用次数错误");
-  await page.route(
-    "**/api/channels/*/test",
-    (route) =>
-      route.fulfill({
-        status: 502,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: { code: "NOTIFICATION_FAILED", message: "模拟渠道拒绝请求" },
-        }),
-      }),
-    { times: 1 },
+  await page.getByRole("tab", { name: "路由矩阵" }).click();
+  const binding = page.getByRole("checkbox", {
+    name: "示例技术源 → Server酱测试",
+  });
+  await expect(binding).toBeChecked();
+  await binding.uncheck();
+  await expect.poll(async () =>
+    (await repositories.subscriptions.list(
+      (await repositories.feeds.list())[0].id,
+    )).length
+  ).toBe(0);
+  await page.getByRole("button", { name: "Server酱测试", exact: true }).click();
+  await expect(binding).toBeChecked();
+  await page.getByRole("tab", { name: "订阅源" }).click();
+  await expect(page.getByRole("tab", { name: "订阅源" })).toHaveAttribute(
+    "aria-selected",
+    "true",
   );
-  await page.getByRole("button", { name: "发送测试通知" }).click();
-  await expect(page.getByRole("alert")).toContainText("模拟渠道拒绝请求");
-  await page.getByRole("button", { name: "编辑渠道" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByLabel("渠道名称").fill("更名渠道");
-  await expect(dialog.getByLabel("替换完整渠道配置")).not.toBeChecked();
-  await dialog.getByRole("button", { name: "保存渠道" }).click();
-  await expect(dialog).toHaveCount(0);
-  await navigate(page, "订阅源");
-  await page.getByRole("button", { name: "添加订阅源" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByLabel("名称", { exact: true }).fill("浏览器测试源");
-  await dialog.getByLabel("RSS / Atom 地址").fill("https://example.test/rss");
-  await expect(dialog.getByLabel("抓取周期")).toHaveValue("30");
-  await dialog.getByLabel("抓取周期").fill("1.5");
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog).toHaveCount(1);
-  await dialog.getByLabel("抓取周期").fill("2");
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(page.getByText("每 2 分钟", { exact: false })).toBeVisible();
-  if ((await repositories.feeds.list())[0].intervalSeconds !== 120) {
-    throw new Error("订阅源分钟换算失败");
-  }
-  // 重复资源错误应出现在仍打开的表单中。
-  await page.getByRole("button", { name: "添加订阅源" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByLabel("名称", { exact: true }).fill("重复源");
-  await dialog.getByLabel("RSS / Atom 地址").fill("https://example.test/rss");
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog.getByRole("alert")).toContainText("资源重复");
-  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
-  const legacyFeed = (await repositories.feeds.list())[0];
-  await repositories.feeds.edit(legacyFeed.id, { intervalSeconds: 90 });
-  await page.getByRole("button", { name: "更新数据" }).click();
-  await expect(page.getByText("约每 2 分钟", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: "编辑", exact: true }).click();
-  dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel("抓取周期")).toHaveValue("2");
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog).toHaveCount(0);
-  if ((await repositories.feeds.get(legacyFeed.id))?.intervalSeconds !== 90) {
-    throw new Error("编辑其他字段时改变了旧周期");
-  }
-  await page.getByRole("button", { name: "编辑", exact: true }).click();
-  dialog = page.getByRole("dialog");
-  await expect(dialog.getByLabel("抓取周期")).toHaveValue("2");
-  await dialog.getByLabel("抓取周期").fill("5");
-  await dialog.getByLabel("RSS / Atom 地址").fill("https://moved.example/rss");
-  await dialog.getByRole("checkbox", { name: "更名渠道", exact: true }).check();
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog).toHaveCount(0);
-  await expect(page.getByText("每 5 分钟", { exact: false })).toBeVisible();
-  await expect(page.getByText("https://moved.example/rss", { exact: true }))
-    .toBeVisible();
-  const editedFeed = (await repositories.feeds.list())[0];
-  if (
-    editedFeed.intervalSeconds !== 300 ||
-    (await repositories.subscriptions.list(editedFeed.id)).length !== 1
-  ) {
-    throw new Error("编辑表单渠道保存失败");
-  }
-  await page.getByRole("button", { name: "编辑", exact: true }).click();
-  dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("checkbox", { name: "更名渠道", exact: true }))
-    .toBeChecked();
-  await dialog.getByRole("checkbox", { name: "更名渠道", exact: true })
-    .uncheck();
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog).toHaveCount(0);
-
-  await page.getByRole("button", { name: "立即刷新" }).click();
-  await expect(page.getByRole("status")).toContainText("刷新已入队");
-  if (jobs[0]?.type !== "fetch_feed") throw new Error("刷新入队失败");
-  await page.getByRole("button", { name: "编辑", exact: true }).click();
-  dialog = page.getByRole("dialog");
-  await expect(dialog.getByRole("textbox", { name: "名称", exact: true }))
-    .toHaveAttribute(
-      "placeholder",
-      "名称留空时，下一次成功抓取会使用 RSS / Atom 中的标题",
-    );
-  await dialog.getByRole("checkbox", { name: "更名渠道", exact: true }).check();
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog).toHaveCount(0);
-  const [feed] = await repositories.feeds.list();
-  const [channel] = await repositories.channels.list();
-  const now = Date.now();
-  await repositories.items.insert({
-    id: "web-item",
-    feedId: feed.id,
-    fingerprint: "web",
-    title: "安全文章",
-    link: "javascript:alert(1)",
-    content: "<img src=x onerror=alert(1)>",
-    createdAt: now,
-  });
-  await repositories.deliveries.insert({
-    id: "web-delivery",
-    itemId: "web-item",
-    channelId: channel.id,
-    status: "failed",
-    attempts: 5,
-    lastError: "模拟限流",
-    createdAt: now,
-    updatedAt: now,
-  });
-  await repositories.feeds.edit(feed.id, { title: "" });
-  await navigate(page, "投递记录");
-  await page.getByLabel("投递状态").selectOption("failed");
-  await expect(page.getByRole("heading", { name: "安全文章" })).toBeVisible();
-  await expect(
-    page.getByText("订阅源：https://moved.example/rss · 通知渠道：更名渠道"),
-  )
-    .toBeVisible();
-  await page.getByRole("button", { name: "查看详情" }).click();
-  dialog = page.getByRole("dialog");
-  await expect(dialog).toContainText("更名渠道");
-  await expect(dialog).toContainText("<img src=x onerror=alert(1)>");
-  await expect(dialog.locator("img")).toHaveCount(0);
-  await expect(dialog.getByRole("link")).toHaveCount(0);
-  await dialog.getByRole("button", { name: "关闭", exact: true }).click();
-  await page.getByRole("button", { name: "重试", exact: true }).click();
-  await expect(page.getByRole("status")).toContainText("重试已入队");
-  if (jobs.at(-1)?.type !== "send_notification") {
-    throw new Error("重试入队失败");
-  }
-  await navigate(page, "设置");
-  await page.getByLabel("添加订阅源时的默认周期").fill("4.5");
-  await page.getByRole("button", { name: "保存设置" }).click();
-  if (await repositories.settings.get("defaultIntervalSeconds") !== undefined) {
-    throw new Error("默认周期接受了小数分钟");
-  }
-  await page.getByLabel("添加订阅源时的默认周期").fill("4");
-  await page.getByRole("button", { name: "保存设置" }).click();
-  await expect(page.getByRole("status")).toContainText("默认抓取周期已保存");
-  await expect(page.getByLabel("添加订阅源时的默认周期")).toHaveValue("4");
-  if (await repositories.settings.get("defaultIntervalSeconds") !== 240) {
-    throw new Error("设置保存失败");
-  }
   await page.setViewportSize({ width: 390, height: 844 });
-  await selectLanguage(page, "页面语言", "English");
-  await page.locator('[data-slot="sidebar-trigger"]').click();
-  await expect(page.getByRole("dialog", { name: "Main navigation" }))
+  await expect(page.getByRole("button", { name: "编辑", exact: true }))
     .toBeVisible();
   await page.screenshot({
-    path: "/tmp/pushrss-sidebar-mobile.png",
+    path: "/tmp/pushrss-relay-mobile.png",
     fullPage: true,
   });
-  await page.keyboard.press("Escape");
-  await expect(page.locator('[data-mobile="true"]')).toHaveCount(0);
-  await selectLanguage(page, "Page language", "简体中文");
-  for (const name of ["概览", "订阅源", "通知渠道", "投递记录", "设置"]) {
-    await navigate(page, name);
-    await expect(page.getByRole("heading", { name, exact: true }))
-      .toBeVisible();
-    if (
-      await page.evaluate(() =>
-        document.documentElement.scrollWidth > innerWidth
-      )
-    ) throw new Error(`${name} 窄屏溢出`);
-  }
-  await navigate(page, "订阅源");
-  await page.getByRole("button", { name: "暂停", exact: true }).click();
-  await expect(page.getByRole("button", { name: "立即刷新" })).toBeDisabled();
-  await page.getByRole("button", { name: "删除", exact: true }).click();
-  await expect(page.getByText("添加第一个订阅源，开始收集新文章。"))
-    .toBeVisible();
-  await navigate(page, "通知渠道");
-  await page.getByRole("button", { name: "删除", exact: true }).click();
-  await expect(page.getByText("添加通知渠道，再前往订阅源详情完成关联。"))
-    .toBeVisible();
-  await page.getByRole("button", { name: "添加通知渠道" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByLabel("渠道名称").fill("Telegram 测试");
-  await dialog.getByLabel("渠道类型").selectOption("telegram");
-  await dialog.getByLabel("Bot Token").fill("123:FakeToken");
-  await dialog.getByLabel("Chat ID").fill("-100123");
-  await dialog.getByLabel("话题 ID").fill("42");
-  await dialog.getByLabel("解析模式").selectOption("HTML");
-  await dialog.getByRole("button", { name: "保存渠道" }).click();
-  await expect(dialog).toHaveCount(0);
-  // 新建时先绑定渠道，首次抓取保存两篇文章并通知最新一篇。
-  await navigate(page, "订阅源");
-  await page.getByRole("button", { name: "添加订阅源" }).click();
-  dialog = page.getByRole("dialog");
-  await dialog.getByLabel("RSS / Atom 地址").fill(
-    "https://initial.example/rss",
-  );
-  await dialog.getByRole("checkbox", { name: "Telegram 测试", exact: true })
-    .check();
-  await dialog.getByRole("button", { name: "保存订阅源" }).click();
-  await expect(dialog).toHaveCount(0);
-  const initialFeed = (await repositories.feeds.list())[0];
   if (
-    !initialFeed.enabled ||
-    initialFeed.title !== "" ||
-    (await repositories.subscriptions.list(initialFeed.id)).length !== 1
-  ) throw new Error("首次抓取前的渠道配置错误");
-  const initialOptions = {
-    fetch: (() =>
-      Promise.resolve(
-        new Response(
-          "<rss><channel><title>测试</title><item><guid>first-1</guid><title>第一篇</title><pubDate>Fri, 25 Sep 2026 00:00:00 GMT</pubDate></item><item><guid>first-2</guid><title>第二篇</title><pubDate>Sat, 26 Sep 2026 00:00:00 GMT</pubDate></item></channel></rss>",
-        ),
-      )) as typeof fetch,
-  };
-  jobs.length = 0;
-  const sentBefore = testCount;
-  await handleJob(
-    services,
-    { type: "fetch_feed", feedId: initialFeed.id },
-    initialOptions,
-  );
-  for (const job of [...jobs]) {
-    await handleJob(services, job);
-  }
-  const firstDeliveries = await repositories.deliveries.list("sent");
-  if (
-    testCount !== sentBefore + 1 || firstDeliveries.length !== 1 ||
-    (await repositories.feeds.get(initialFeed.id))?.title !== "测试" ||
-    (await repositories.items.list(initialFeed.id)).length !== 2 ||
-    (await repositories.items.get(firstDeliveries[0].itemId))?.title !==
-      "第二篇"
-  ) throw new Error("首次抓取推送失败");
-  jobs.length = 0;
-  await handleJob(
-    services,
-    { type: "fetch_feed", feedId: initialFeed.id },
-    initialOptions,
-  );
-  if (jobs.length) throw new Error("重复抓取产生重复推送");
+    await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
+  ) throw new Error("手机页面横向溢出");
   await page.getByRole("button", { name: "删除", exact: true }).click();
-  await expect(page.getByText("添加第一个订阅源，开始收集新文章。"))
-    .toBeVisible();
-  await navigate(page, "通知渠道");
-  // 真实仓储分页与前端错误恢复。
-  for (let i = 0; i < 21; i++) {
-    await repositories.feeds.save({
-      id: `page-${String(i).padStart(2, "0")}`,
-      url: `https://page.test/${i}`,
-      title: `分页订阅 ${i}`,
-      enabled: false,
-      createdAt: now,
-      updatedAt: now,
-      nextFetchAt: now,
-    });
-  }
-  await page.route(
-    "**/api/feeds?*",
-    (route) =>
-      route.fulfill({
-        status: 503,
-        contentType: "application/json",
-        body: JSON.stringify({ error: { message: "模拟暂时不可用" } }),
-      }),
-    { times: 1 },
-  );
-  await navigate(page, "订阅源");
-  await expect(page.getByRole("alert")).toContainText("模拟暂时不可用");
-  await page.getByRole("button", { name: "更新数据" }).click();
-  await expect(page.getByRole("heading", { name: "分页订阅 0", exact: false }))
-    .toBeVisible();
-  await page.getByRole("button", { name: "下一页" }).click();
-  await expect(page.getByRole("heading", { name: "分页订阅 20", exact: false }))
-    .toBeVisible();
-  await expect(page.getByRole("button", { name: "下一页" })).toBeDisabled();
-  await navigate(page, "概览");
-  await expect(page.locator(".stats strong").first()).toHaveText("21");
-  await page.screenshot({ path: "/tmp/pushrss-m6-mobile.png", fullPage: true });
-  await page.setViewportSize({ width: 1360, height: 900 });
-  await page.screenshot({
-    path: "/tmp/pushrss-m6-desktop.png",
-    fullPage: true,
-  });
-  await page.reload();
-  await expect(page.getByRole("heading", { name: "概览", exact: true }))
-    .toBeVisible();
-  await page.getByRole("button", { name: "退出" }).click();
-  await expect(page.getByLabel("管理密码")).toBeVisible();
+  await expect(page.getByText("还没有订阅源")).toBeVisible();
+  await page.getByRole("tab", { name: "推送渠道" }).click();
+  await page.getByRole("button", { name: "删除 Server酱测试" }).click();
+  await expect(page.getByText("还没有推送渠道")).toBeVisible();
+  // 清除会话后 API 返回 401，页面回到密码登录。
+  await page.context().clearCookies();
   await page.reload();
   await expect(page.getByLabel("管理密码")).toBeVisible();
-  // Browser preferences, explicit selection, persistence and automatic switching.
-  const english = await browser.newPage({ locale: "en-US" });
-  english.on("pageerror", (e) => errors.push(e.message));
-  await english.goto(`http://127.0.0.1:${server.addr.port}`);
-  await expect(english.locator("html")).toHaveAttribute("lang", "en");
-  await expect(english.getByLabel("Page language")).toHaveValue("system");
-  await english.getByLabel("Admin password").fill("wrong");
-  await english.getByRole("button", { name: "Open dashboard" }).click();
-  await expect(english.getByRole("alert")).toHaveText(
-    "Incorrect admin password",
-  );
-  await english.getByLabel("Admin password").fill(token);
-  await english.getByRole("button", { name: "Open dashboard" }).click();
-  await expect(english.getByRole("heading", { name: "Overview", exact: true }))
-    .toBeVisible();
-  for (
-    const name of ["Feeds", "Notification channels", "Deliveries", "Settings"]
-  ) {
-    await navigate(english, name);
-    await expect(english.getByRole("heading", { name, exact: true }))
-      .toBeVisible();
-  }
-  await selectLanguage(english, "Page language", "简体中文");
-  await expect(english.getByRole("heading", { name: "设置", exact: true }))
-    .toBeVisible();
-  await expect(english.locator("html")).toHaveAttribute("lang", "zh-CN");
-  await english.reload();
-  await expect(english.getByRole("heading", { name: "概览", exact: true }))
-    .toBeVisible();
-  await navigate(english, "设置");
-  await english.getByRole("button", { name: "页面语言", exact: true }).click();
-  await expect(english.getByRole("menuitemradio", { name: "简体中文" }))
-    .toHaveAttribute("aria-checked", "true");
-  await english.getByRole("menuitemradio", { name: "跟随浏览器" }).click();
-  await expect(english.getByRole("heading", { name: "Settings", exact: true }))
-    .toBeVisible();
-  await english.evaluate(() => {
-    Object.defineProperty(navigator, "languages", {
-      configurable: true,
-      value: ["zh-CN"],
-    });
-    globalThis.dispatchEvent(new Event("languagechange"));
-  });
-  await expect(english.getByRole("heading", { name: "设置", exact: true }))
-    .toBeVisible();
-  await selectLanguage(english, "页面语言", "English");
-  await english.evaluate(() =>
-    globalThis.dispatchEvent(new Event("languagechange"))
-  );
-  await expect(english.locator("html")).toHaveAttribute("lang", "en");
-  await english.setViewportSize({ width: 390, height: 844 });
-  if (
-    await english.evaluate(() =>
-      document.documentElement.scrollWidth > innerWidth
-    )
-  ) {
-    throw new Error("英文设置页窄屏溢出");
-  }
-  await english.getByRole("button", { name: "Sign out", exact: true }).click();
-  await english.reload();
-  await expect(english.getByLabel("Admin password")).toBeVisible();
-  await expect(english.getByLabel("Page language")).toHaveValue("en");
-  await english.getByLabel("Page language").selectOption("system");
-  await english.reload();
-  await expect(english.getByLabel("Page language")).toHaveValue("system");
-  await english.close();
-
-  const fallback = await browser.newPage({ locale: "fr-FR" });
-  await fallback.addInitScript(() =>
-    localStorage.setItem("pushrss.language", "invalid")
-  );
-  await fallback.goto(`http://127.0.0.1:${server.addr.port}`);
-  await expect(fallback.getByLabel("Admin password")).toBeVisible();
-  await expect(fallback.getByLabel("Page language")).toHaveValue("system");
-  await fallback.close();
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "shadcn 侧边栏折叠、键盘、移动导航、组件表单、中英文语言检测、切换、持久化、回退、窄屏及中文界面登录、刷新保持会话、退出、配置、关联、模拟测试通知、文章安全展示、投递重试、设置、删除及窄屏验证通过",
+    "rss 页面验收通过：登录、八种渠道选项、检测与分类关键词、基线、队列刷新、编辑、搜索、路由、移动端、删除",
   );
 } finally {
   await browser.close();

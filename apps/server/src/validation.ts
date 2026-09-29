@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 export class ApiError extends Error {
   constructor(
-    public status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 502 | 503,
+    public status: 400 | 401 | 403 | 404 | 409 | 413 | 415 | 422 | 502 | 503,
     public code: string,
     message: string,
   ) {
@@ -16,13 +16,6 @@ export function string(value: unknown, max = 500): string {
     invalid();
   }
   return value.trim();
-}
-export function interval(value: unknown): number {
-  if (
-    typeof value !== "number" || !Number.isInteger(value) || value < 60 ||
-    value > 2592000
-  ) invalid();
-  return value;
 }
 export function boolean(value: unknown): boolean {
   if (typeof value !== "boolean") invalid();
@@ -40,17 +33,6 @@ export function feedUrl(value: unknown): string {
   } catch {
     return invalid();
   }
-}
-export function pagination(c: Context): [number, number] {
-  const read = (key: string, fallback: number) => {
-    const v = c.req.query(key);
-    if (v === undefined) return fallback;
-    if (!/^\d+$/.test(v)) invalid();
-    return Number(v);
-  };
-  const limit = read("limit", 50), offset = read("offset", 0);
-  if (!Number.isSafeInteger(offset) || limit < 1 || limit > 100) invalid();
-  return [limit, offset];
 }
 export async function body(
   c: Context,

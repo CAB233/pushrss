@@ -25,6 +25,7 @@ export async function createCloudflareRuntime(
   return {
     app: createApp("cloudflare", {
       ...services,
+      fetch: options.fetch,
       repositories,
       queue,
       adminPassword,

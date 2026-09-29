@@ -5,7 +5,7 @@ import type {
   D1Statement,
 } from "../packages/platform/cloudflare/bindings.ts";
 import { verifyCloudflare } from "./cloudflare-contract.ts";
-Deno.test("Cloudflare 任务契约：首次推送、重复消费、退避、租约及补偿", async () => {
+Deno.test("Cloudflare 任务契约：基线与更新推送、重复消费、退避、租约及补偿", async () => {
   const client = new DatabaseSync(":memory:");
   client.exec("PRAGMA foreign_keys=ON");
   const bindings = new WeakMap<

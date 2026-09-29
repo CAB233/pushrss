@@ -1,26 +1,53 @@
-import { and, asc, desc, eq, isNull, lte, or, sql } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  isNotNull,
+  isNull,
+  lte,
+  or,
+  sql,
+} from "drizzle-orm";
 import type { SqliteRemoteDatabase } from "drizzle-orm/sqlite-proxy";
 import * as s from "./schema.ts";
 export type Feed = typeof s.feeds.$inferSelect;
 export type Channel = typeof s.notificationChannels.$inferSelect;
 export type StoredItem = typeof s.feedItems.$inferSelect;
 export type Delivery = typeof s.deliveries.$inferSelect;
-export type DeliverySummary = Delivery & {
-  itemTitle: string;
+export interface DeliveryLogRow {
+  id: string;
+  at: number;
   feedTitle: string;
-  feedUrl: string;
   channelName: string;
-};
-export interface Overview {
-  feeds: number;
-  articlesToday: number;
-  sentToday: number;
-  failed: number;
-  recentFeeds: Feed[];
-  failingFeeds: Feed[];
+  channelType: Channel["type"];
+  itemTitle: string;
+  itemLink: string | null;
+  ok: boolean;
+  error: string | null;
+}
+export interface FeedDetails {
+  channelIds: string[];
+  itemCount: number;
+  latestItems: Pick<
+    StoredItem,
+    "id" | "title" | "link" | "summary" | "content" | "publishedAt"
+  >[];
+}
+export interface ChannelStats {
+  deliveredCount: number;
+  lastDeliveryAt: number | null;
 }
 export interface Repositories {
-  overview(start: number, end: number): Promise<Overview>;
+  logs: {
+    list(): Promise<DeliveryLogRow[]>;
+    clear(): Promise<void>;
+  };
+  dashboard: {
+    feeds(): Promise<(Feed & FeedDetails)[]>;
+    channels(): Promise<(Channel & ChannelStats)[]>;
+  };
+  stats(start: number, end: number): Promise<{ sentToday: number }>;
   feeds: {
     fillTitleIfBlank(
       id: string,
@@ -32,6 +59,8 @@ export interface Repositories {
       value: Partial<
         Pick<
           Feed,
+          | "category"
+          | "keywords"
           | "url"
           | "title"
           | "enabled"
@@ -48,6 +77,7 @@ export interface Repositories {
       value: Partial<
         Pick<
           Feed,
+          | "siteUrl"
           | "lastFetchedAt"
           | "nextFetchAt"
           | "etag"
@@ -59,13 +89,16 @@ export interface Repositories {
       >,
       expectedUrl?: string,
     ): Promise<void>;
-    list(limit?: number, offset?: number): Promise<Feed[]>;
+    list(
+      limit?: number,
+      offset?: number,
+    ): Promise<Feed[]>;
     due(now: number, limit?: number): Promise<Feed[]>;
     remove(id: string): Promise<void>;
   };
   items: {
     get(id: string): Promise<StoredItem | undefined>;
-    latestForChannel(channelId: string): Promise<StoredItem | undefined>;
+    countForFeed(feedId: string): Promise<number>;
     insert(
       value: typeof s.feedItems.$inferInsert,
       expectedUrl?: string,
@@ -77,6 +110,10 @@ export interface Repositories {
     ): Promise<StoredItem[]>;
   };
   channels: {
+    recordTest(id: string, at: number, error?: string): Promise<void>;
+    stats(
+      id: string,
+    ): Promise<{ deliveredCount: number; lastDeliveryAt: number | null }>;
     save(value: typeof s.notificationChannels.$inferInsert): Promise<Channel>;
     get(id: string): Promise<Channel | undefined>;
     list(limit?: number, offset?: number): Promise<Channel[]>;
@@ -93,11 +130,6 @@ export interface Repositories {
     channelsForFeed(feedId: string): Promise<Channel[]>;
   };
   deliveries: {
-    listWithContext(
-      status?: Delivery["status"],
-      limit?: number,
-      offset?: number,
-    ): Promise<DeliverySummary[]>;
     list(
       status?: Delivery["status"],
       limit?: number,
@@ -125,10 +157,6 @@ export interface Repositories {
       >,
     ): Promise<void>;
   };
-  settings: {
-    get(key: string): Promise<unknown>;
-    set(key: string, value: unknown, now: number): Promise<void>;
-  };
 }
 function page(limit = 50, offset = 0) {
   if (
@@ -140,32 +168,107 @@ function page(limit = 50, offset = 0) {
 /** 单次方法为独立 SQL 操作；跨方法业务原子性由平台任务编排处理。 */
 export function createRepositories(db: SqliteRemoteDatabase): Repositories {
   return {
-    async overview(start, end) {
-      const rows = await db.select({
-        feeds: sql<number>`(SELECT count(*) FROM feeds)`,
-        articlesToday: sql<
-          number
-        >`(SELECT count(*) FROM feed_items WHERE created_at >= ${start} AND created_at < ${end})`,
-        sentToday: sql<
-          number
-        >`(SELECT count(*) FROM deliveries WHERE status = 'sent' AND sent_at >= ${start} AND sent_at < ${end})`,
-        failed: sql<
-          number
-        >`(SELECT count(*) FROM deliveries WHERE status = 'failed')`,
-      }).from(sql`(SELECT 1)`);
-      const counts = rows[0] as unknown as Pick<
-        Overview,
-        "feeds" | "articlesToday" | "sentToday" | "failed"
-      >;
-      return {
-        ...counts,
-        recentFeeds: await db.select().from(s.feeds).where(
-          sql`${s.feeds.lastFetchedAt} IS NOT NULL`,
-        ).orderBy(desc(s.feeds.lastFetchedAt)).limit(5),
-        failingFeeds: await db.select().from(s.feeds).where(
-          sql`${s.feeds.failureCount} > 0`,
-        ).orderBy(desc(s.feeds.updatedAt)).limit(5),
-      };
+    logs: {
+      async list() {
+        const rows = await db.select({
+          id: s.deliveries.id,
+          at: sql<
+            number
+          >`coalesce(${s.deliveries.sentAt}, ${s.deliveries.updatedAt})`,
+          feedTitle: sql<
+            string
+          >`coalesce(nullif(${s.feeds.title}, ''), ${s.feeds.url}, '渠道测试')`,
+          channelName: s.notificationChannels.name,
+          channelType: s.notificationChannels.type,
+          itemTitle: sql<
+            string
+          >`coalesce(${s.feedItems.title}, 'PushRSS测试通知')`,
+          itemLink: s.feedItems.link,
+          status: s.deliveries.status,
+          error: s.deliveries.lastError,
+        }).from(s.deliveries)
+          .innerJoin(
+            s.notificationChannels,
+            eq(s.notificationChannels.id, s.deliveries.channelId),
+          )
+          .leftJoin(s.feedItems, eq(s.feedItems.id, s.deliveries.itemId))
+          .leftJoin(s.feeds, eq(s.feeds.id, s.feedItems.feedId))
+          .where(
+            and(
+              eq(s.deliveries.logVisible, true),
+              or(
+                eq(s.deliveries.status, "sent"),
+                eq(s.deliveries.status, "failed"),
+              ),
+            ),
+          )
+          .orderBy(
+            desc(
+              sql`coalesce(${s.deliveries.sentAt}, ${s.deliveries.updatedAt})`,
+            ),
+            asc(s.deliveries.id),
+          ).limit(100);
+        return rows.map(({ status, ...row }) => ({
+          ...row,
+          ok: status === "sent",
+        }));
+      },
+      async clear() {
+        await db.update(s.deliveries).set({ logVisible: false }).where(
+          or(
+            eq(s.deliveries.status, "sent"),
+            eq(s.deliveries.status, "failed"),
+          ),
+        );
+      },
+    },
+    dashboard: {
+      async feeds() {
+        const rows = await db.select({
+          feed: s.feeds,
+          itemCount: sql<
+            number
+          >`(SELECT count(*) FROM feed_items WHERE feed_id = feeds.id)`,
+          channelIds: sql<
+            string
+          >`(SELECT json_group_array(channel_id) FROM subscriptions WHERE feed_id = feeds.id)`,
+          latestItems: sql<
+            string
+          >`(SELECT json_group_array(json_object('id', id, 'title', title, 'link', link, 'summary', summary, 'content', content, 'publishedAt', published_at)) FROM (SELECT id, title, link, summary, content, published_at FROM feed_items WHERE feed_id = feeds.id ORDER BY coalesce(published_at, created_at) DESC, created_at DESC, id ASC LIMIT 5))`,
+        }).from(s.feeds).orderBy(desc(s.feeds.createdAt), asc(s.feeds.id));
+        return rows.map(({ feed, channelIds, latestItems, itemCount }) => ({
+          ...feed,
+          itemCount,
+          channelIds: JSON.parse(channelIds),
+          latestItems: JSON.parse(latestItems),
+        }));
+      },
+      async channels() {
+        const rows = await db.select({
+          channel: s.notificationChannels,
+          deliveredCount: sql<
+            number
+          >`(SELECT count(*) FROM deliveries WHERE channel_id = notification_channels.id AND status = 'sent')`,
+          lastDeliveryAt: sql<
+            number | null
+          >`(SELECT max(sent_at) FROM (SELECT sent_at FROM deliveries WHERE channel_id = notification_channels.id AND status = 'sent'))`,
+        }).from(s.notificationChannels).orderBy(
+          desc(s.notificationChannels.createdAt),
+          asc(s.notificationChannels.id),
+        );
+        return rows.map(({ channel, ...stats }) => ({ ...channel, ...stats }));
+      },
+    },
+    async stats(start, end) {
+      const rows = await db.select({ sentToday: sql<number>`count(*)` }).from(
+        s.deliveries,
+      ).where(
+        and(
+          eq(s.deliveries.status, "sent"),
+          sql`${s.deliveries.sentAt} >= ${start} AND ${s.deliveries.sentAt} < ${end}`,
+        ),
+      );
+      return rows[0];
     },
     feeds: {
       async fillTitleIfBlank(id, title, expectedUrl) {
@@ -226,9 +329,8 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
       },
       async list(limit, offset) {
         const p = page(limit, offset);
-        return await db.select().from(s.feeds).orderBy(asc(s.feeds.id)).limit(
-          p.limit,
-        ).offset(p.offset);
+        return await db.select().from(s.feeds).orderBy(asc(s.feeds.id))
+          .limit(p.limit).offset(p.offset);
       },
       async due(now, limit) {
         const p = page(limit);
@@ -246,19 +348,11 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
           eq(s.feedItems.id, id),
         ).limit(1))[0];
       },
-      async latestForChannel(channelId) {
-        const rows = await db.select({ item: s.feedItems }).from(s.feedItems)
-          .innerJoin(
-            s.subscriptions,
-            eq(s.subscriptions.feedId, s.feedItems.feedId),
-          ).where(eq(s.subscriptions.channelId, channelId)).orderBy(
-            desc(
-              sql`coalesce(${s.feedItems.publishedAt}, ${s.feedItems.createdAt})`,
-            ),
-            desc(s.feedItems.createdAt),
-            asc(s.feedItems.id),
-          ).limit(1);
-        return rows[0]?.item;
+      async countForFeed(feedId) {
+        const rows = await db.select({ total: sql<number>`count(*)` }).from(
+          s.feedItems,
+        ).where(eq(s.feedItems.feedId, feedId));
+        return rows[0].total;
       },
       async insert(value, expectedUrl) {
         if (expectedUrl !== undefined) {
@@ -300,12 +394,42 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
         const p = page(limit, offset);
         return await db.select().from(s.feedItems).where(
           eq(s.feedItems.feedId, feedId),
-        ).orderBy(desc(s.feedItems.createdAt), asc(s.feedItems.id)).limit(
+        ).orderBy(
+          desc(
+            sql`coalesce(${s.feedItems.publishedAt}, ${s.feedItems.createdAt})`,
+          ),
+          desc(s.feedItems.createdAt),
+          asc(s.feedItems.id),
+        ).limit(
           p.limit,
         ).offset(p.offset);
       },
     },
     channels: {
+      async recordTest(id, at, error) {
+        await db.insert(s.deliveries).values({
+          id: crypto.randomUUID(),
+          channelId: id,
+          itemId: null,
+          status: error === undefined ? "sent" : "failed",
+          attempts: 1,
+          sentAt: error === undefined ? at : null,
+          lastError: error ?? null,
+          createdAt: at,
+          updatedAt: at,
+        });
+      },
+      async stats(id) {
+        const rows = await db.select({
+          deliveredCount: sql<
+            number
+          >`(SELECT count(*) FROM deliveries WHERE channel_id = ${id} AND status = 'sent')`,
+          lastDeliveryAt: sql<
+            number | null
+          >`(SELECT max(sent_at) FROM (SELECT sent_at FROM deliveries WHERE channel_id = ${id} AND status = 'sent'))`,
+        }).from(sql`(SELECT 1)`);
+        return rows[0];
+      },
       async save(value) {
         const { id: _id, createdAt: _createdAt, ...changes } = value;
         return (await db.insert(s.notificationChannels).values(value)
@@ -336,7 +460,8 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
         const p = page(limit, offset);
         return await db.select().from(s.subscriptions).where(
           feedId ? eq(s.subscriptions.feedId, feedId) : undefined,
-        ).orderBy(asc(s.subscriptions.id)).limit(p.limit).offset(p.offset);
+        ).orderBy(asc(s.subscriptions.feedId), asc(s.subscriptions.channelId))
+          .limit(p.limit).offset(p.offset);
       },
       async add(value) {
         await db.insert(s.subscriptions).values(value).onConflictDoNothing({
@@ -372,33 +497,6 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
       },
     },
     deliveries: {
-      async listWithContext(status, limit, offset) {
-        const p = page(limit, offset);
-        const rows = await db.select({
-          delivery: s.deliveries,
-          itemTitle: sql<string>`${s.feedItems.title}`.as(
-            "delivery_item_title",
-          ),
-          feedTitle: sql<string>`${s.feeds.title}`.as("delivery_feed_title"),
-          feedUrl: sql<string>`${s.feeds.url}`.as("delivery_feed_url"),
-          channelName: sql<string>`${s.notificationChannels.name}`.as(
-            "delivery_channel_name",
-          ),
-        }).from(s.deliveries)
-          .innerJoin(s.feedItems, eq(s.deliveries.itemId, s.feedItems.id))
-          .innerJoin(s.feeds, eq(s.feedItems.feedId, s.feeds.id))
-          .innerJoin(
-            s.notificationChannels,
-            eq(s.deliveries.channelId, s.notificationChannels.id),
-          )
-          .where(status ? eq(s.deliveries.status, status) : undefined)
-          .orderBy(desc(s.deliveries.createdAt), asc(s.deliveries.id))
-          .limit(p.limit).offset(p.offset);
-        return rows.map(({ delivery, ...context }) => ({
-          ...delivery,
-          ...context,
-        }));
-      },
       async list(status, limit, offset) {
         const p = page(limit, offset);
         return await db.select().from(s.deliveries).where(
@@ -427,10 +525,15 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
         return (await db.update(s.deliveries).set({
           status: "pending",
           attempts: 0,
+          logVisible: true,
           nextAttemptAt: now,
           updatedAt: now,
         }).where(
-          and(eq(s.deliveries.id, id), eq(s.deliveries.status, "failed")),
+          and(
+            eq(s.deliveries.id, id),
+            eq(s.deliveries.status, "failed"),
+            isNotNull(s.deliveries.itemId),
+          ),
         ).returning())[0];
       },
       async insert(value) {
@@ -445,20 +548,6 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
       },
       async update(id, value) {
         await db.update(s.deliveries).set(value).where(eq(s.deliveries.id, id));
-      },
-    },
-    settings: {
-      async get(key) {
-        return (await db.select().from(s.settings).where(
-          eq(s.settings.key, key),
-        ).limit(1))[0]?.value;
-      },
-      async set(key, value, now) {
-        await db.insert(s.settings).values({ key, value, updatedAt: now })
-          .onConflictDoUpdate({
-            target: s.settings.key,
-            set: { value, updatedAt: now },
-          });
       },
     },
   };

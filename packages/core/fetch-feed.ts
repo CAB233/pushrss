@@ -1,3 +1,4 @@
+import { publicUrl } from "../notifier/mod.ts";
 import type { Repositories, StoredItem } from "../db/repositories.ts";
 import { fingerprint, parseFeed } from "./feed.ts";
 
@@ -6,7 +7,6 @@ export interface FetchOptions {
   now?: () => number;
   timeoutMs?: number;
   maxBytes?: number;
-  latestOnly?: boolean;
 }
 export type FetchResult =
   | { status: "skipped" }
@@ -19,7 +19,10 @@ export type FetchResult =
     notificationItems: StoredItem[];
   };
 class FeedError extends Error {}
-async function readBody(response: Response, maxBytes: number): Promise<string> {
+export async function readBody(
+  response: Response,
+  maxBytes: number,
+): Promise<string> {
   const reader = response.body?.getReader();
   if (!reader) return "";
   const decoder = new TextDecoder();
@@ -41,7 +44,24 @@ async function readBody(response: Response, maxBytes: number): Promise<string> {
     reader.releaseLock();
   }
 }
-/** 首次抓取与手动刷新仅通知最新新增文章；其余抓取通知全部新增文章。 */
+/** 使用标准 Web API 跟随公开地址重定向，复用调用者的超时信号。 */
+export async function fetchPublicFeed(
+  url: string,
+  init: RequestInit,
+  request: typeof globalThis.fetch = globalThis.fetch,
+): Promise<Response> {
+  let target = publicUrl(url);
+  for (let attempt = 0; attempt <= 5; attempt++) {
+    const response = await request(target, { ...init, redirect: "manual" });
+    if (![301, 302, 303, 307, 308].includes(response.status)) return response;
+    const location = response.headers.get("location");
+    await response.body?.cancel();
+    if (!location) throw new FeedError("Feed 重定向地址缺失");
+    target = publicUrl(new URL(location, target).href);
+  }
+  throw new FeedError("Feed 重定向次数超过限制");
+}
+/** 样例源首次建立基线，后续过滤并分发至多十条新增文章。 */
 export async function fetchFeed(
   repos: Repositories,
   feedId: string,
@@ -62,7 +82,7 @@ export async function fetchFeed(
   let etag: string | null = feed.etag;
   let lastModified: string | null = feed.lastModified;
   try {
-    const u = new URL(feed.url);
+    const u = new URL(publicUrl(feed.url));
     if (!["http:", "https:"].includes(u.protocol)) {
       throw new FeedError("Feed URL 协议无效");
     }
@@ -76,10 +96,11 @@ export async function fetchFeed(
         headers.set("If-Modified-Since", feed.lastModified);
       }
     }
-    const response = await (options.fetch ?? globalThis.fetch)(u, {
+    const request = options.fetch ?? globalThis.fetch;
+    const response = await fetchPublicFeed(u.href, {
       headers,
       signal: controller.signal,
-    });
+    }, request);
     if ((await repos.feeds.get(feedId))?.url !== feed.url) {
       await response.body?.cancel();
       return { status: "skipped" };
@@ -103,6 +124,13 @@ export async function fetchFeed(
       } catch {
         throw new FeedError("Feed XML 无效或格式暂未支持");
       }
+      if (parsed.siteUrl) {
+        await repos.feeds.updateFetch(
+          feedId,
+          { siteUrl: parsed.siteUrl },
+          feed.url,
+        );
+      }
       if (parsed.title && !feed.title.trim()) {
         await repos.feeds.fillTitleIfBlank(
           feedId,
@@ -113,14 +141,19 @@ export async function fetchFeed(
       const added: StoredItem[] = [];
       const notificationItems: StoredItem[] = [];
       const initial = feed.lastFetchedAt === null;
-      const latestOnly = initial || options.latestOnly === true;
-      const items = latestOnly
-        ? parsed.items.toSorted((a, b) =>
-          (b.publishedAt ?? -Infinity) - (a.publishedAt ?? -Infinity)
-        )
-        : parsed.items;
-      for (const item of items) {
-        const notify = !latestOnly || notificationItems.length === 0;
+      for (const item of parsed.items) {
+        const matches = feed.keywords.length === 0 ||
+          feed.keywords.some((keyword) =>
+            `${item.title} ${
+              (item.summary ?? item.content ?? "").replace(/<[^>]*>/g, " ")
+                .replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim().slice(
+                  0,
+                  280,
+                )
+            }`
+              .toLocaleLowerCase().includes(keyword.toLocaleLowerCase())
+          );
+        const notify = !initial && matches && notificationItems.length < 10;
         const saved = await repos.items.insert({
           ...item,
           id: crypto.randomUUID(),
@@ -131,7 +164,9 @@ export async function fetchFeed(
         }, feed.url);
         if (saved) {
           added.push(saved);
-          if (notify) notificationItems.push(saved);
+          if (notify) {
+            notificationItems.push(saved);
+          }
         }
       }
       etag = response.headers.get("etag");
