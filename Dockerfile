@@ -5,6 +5,12 @@ COPY . .
 RUN deno install --frozen && deno task build:web \
     && deno bundle --platform=deno --minify --frozen-lockfile \
        --output=dist/server/main.js packages/platform/deno/main.ts
+RUN mkdir -p /runtime/app/packages/platform/deno /runtime/app/packages/db \
+             /runtime/app/apps/web /runtime/app/scripts /runtime/data \
+    && cp dist/server/main.js /runtime/app/packages/platform/deno/main.js \
+    && cp -r packages/db/migrations /runtime/app/packages/db/ \
+    && cp -r apps/web/dist /runtime/app/apps/web/ \
+    && cp scripts/backup.ts /runtime/app/scripts/
 
 FROM docker.io/denoland/deno:distroless-2.9.7
 ENV DENO_DIR=/deno-dir \
@@ -13,12 +19,7 @@ ENV DENO_DIR=/deno-dir \
     DATABASE_PATH=/data/pushrss.db \
     PUSHRSS_WEB_DIR=/app/apps/web/dist
 WORKDIR /app
-# 保持迁移目录相对后端入口的位置，供 import.meta.url 定位。
-COPY --from=builder /app/dist/server/main.js ./packages/platform/deno/main.js
-COPY --from=builder /app/packages/db/migrations/ ./packages/db/migrations/
-COPY --from=builder /app/apps/web/dist/ ./apps/web/dist/
-COPY --from=builder /app/scripts/backup.ts ./scripts/backup.ts
-RUN ["/bin/deno", "eval", "Deno.mkdirSync('/data', { recursive: true })"]
+COPY --from=builder /runtime/ /
 VOLUME ["/data"]
 EXPOSE 8000
 CMD ["run", "--no-config", "--no-lock", "--cached-only", "--allow-net", "--allow-read", "--allow-write=/data", "--allow-env", "packages/platform/deno/main.js"]

@@ -5,11 +5,46 @@ PushRSS 是面向个人使用的 RSS 推送服务，支持Server酱³ 和 Telegr
 
 ## Docker 部署
 
-基于 Deno distroless 镜像。
+基于 Deno distroless 镜像。compose 示例：
+
+```yaml
+services:
+  pushrss:
+    image: ghcr.io/cab233/pushrss:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      PUSHRSS_MASTER_KEY: <run `openssl rand -base64 32`>
+      PUSHRSS_ADMIN_PASSWORD: <any string>
+      DATABASE_PATH: /data/pushrss.db
+      HOST: 0.0.0.0
+      PORT: "8000"
+      PUSHRSS_WEB_DIR: /app/apps/web/dist
+    volumes:
+      - pushrss-data:/data
+
+volumes:
+  pushrss-data:
+```
+
+在同一目录创建 `.env`，填写以下两项。主密钥通过 `openssl rand -base64 32`
+生成，管理密码自行设置：
+
+```dotenv
+PUSHRSS_MASTER_KEY=生成的Base64主密钥
+PUSHRSS_ADMIN_PASSWORD=自行设置的管理密码
+```
+
+启动或更新服务：
 
 ```sh
-docker pull ghcr.io/cab233/pushrss:latest
+docker compose pull
+docker compose up -d
 ```
+
+浏览器访问 `http://127.0.0.1:8000`。数据库保存在 `pushrss-data` 命名卷中，
+启动时自动迁移。公网访问通过宿主机 TLS 反向代理接入；更新时保留数据卷和原主密钥。
 
 ## Cloudflare Workers 部署
 
