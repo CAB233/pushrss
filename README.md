@@ -3,75 +3,15 @@
 PushRSS 是面向个人使用的 RSS 推送服务，支持Server酱³ 和 Telegram Bot
 通知渠道，且服务可运行在 Docker 或 Cloudflare Workers。
 
-RSS 2.0 与 Atom 1.0 使用 [GabsEdits/parser 的 `@feed/parser` 1.0.1](https://github.com/GabsEdits/parser)，
-解析结果通过共享适配器映射到 PushRSS 文章模型。该依赖采用 GPL-3.0-only 许可证，分发部署时需遵循其许可证要求。
+## Docker 部署
 
-## 本地启动
-
-需要 Deno 2.9.7。在仓库根目录安装锁定的依赖，并创建配置文件：
-
-```sh
-# 安装依赖
-deno install --frozen
-
-# 配置变量
-cp .env.example .env
-```
-
-同时启动后端服务和前端开发服务器：
-
-```sh
-deno task dev
-```
-
-浏览器打开 Vite 输出的地址，默认是
-`http://127.0.0.1:5173`。Vite 将 `/api` 和 `/health` 代理到
-`http://127.0.0.1:8000`。修改 `.env` 中的 `PORT` 时，同步修改
-[`apps/web/vite.config.ts`](apps/web/vite.config.ts) 的代理目标。
-后端启动时自动迁移 SQLite 数据库，并运行抓取调度器和任务消费者。单独启动服务时可使用
-`deno task dev:api` 或 `deno task dev:web`。
-
-使用构建后的单服务前端时，执行：
-
-```sh
-deno task build:web
-PUSHRSS_WEB_DIR=apps/web/dist deno task dev:api
-```
-
-浏览器随后打开 `http://127.0.0.1:8000`。静态前端、API 和后台任务由同一个 Deno
-进程提供。
-
-## Docker 自托管
-
-发布正式 GitHub Release 或在 Actions 中手动运行 `Release` 工作流，会构建并推送
-`ghcr.io/cab233/pushrss:latest`（linux/amd64）。手动运行发布所选 ref 的代码，
-预发布 Release 跳过发布。工作流使用仓库自带的 `GITHUB_TOKEN` 登录 GHCR。
+基于 Deno distroless 镜像。
 
 ```sh
 docker pull ghcr.io/cab233/pushrss:latest
 ```
 
-镜像采用多阶段构建：后端及依赖打包为单个 JavaScript 文件，最终基于 Deno
-distroless 镜像，仅复制后端包、SQL
-迁移、前端静态产物与备份脚本。启动使用本地文件，构建工具和依赖缓存留在构建阶段。
-
-需要 Docker 和 Docker Compose。先按“本地启动”中的方法创建 `.env`
-并填写主密钥与管理密码，然后运行：
-
-```sh
-docker compose up -d --build
-```
-
-浏览器打开
-`http://127.0.0.1:8000`。容器启动时自动迁移数据库，运行管理界面、API、
-调度器和任务消费者。`compose.yaml` 将 SQLite 数据库保存在 `pushrss-data`
-命名卷的 `/data/pushrss.db`，并将服务映射到宿主机回环地址。更新镜像时再次运行
-`docker compose up -d --build`。公网访问可通过宿主机的 TLS 反向代理接入。
-
 ## Cloudflare Workers 部署
-
-需要已登录的 Cloudflare 账号，并为 D1、Queues 和 Workers
-准备可用资源。先创建数据库与队列：
 
 ```sh
 deno install --frozen
@@ -96,20 +36,35 @@ deno task wrangler deploy
 负责执行抓取与通知任务。后续发布继续使用原
 `PUSHRSS_MASTER_KEY`，并在数据库迁移变化时先执行远程迁移。
 
-本地模拟 Worker 使用独立的 `.dev.vars`：
+## 本地开发
 
 ```sh
-cp .dev.vars.example .dev.vars
+deno install --frozen
 # 填写 PUSHRSS_MASTER_KEY 与 PUSHRSS_ADMIN_PASSWORD
+cp .env.example .env
+deno task dev
+```
+
+使用构建后的单服务前端时，执行：
+
+```sh
+deno task build:web
+PUSHRSS_WEB_DIR=apps/web/dist deno task dev:api
+```
+
+## 本地 Worker 开发
+
+`.dev.vars` 仅用于本地开发，生产环节中 secret 由 Wrangler 管理。
+
+```sh
+# 填写 PUSHRSS_MASTER_KEY 与 PUSHRSS_ADMIN_PASSWORD
+cp .dev.vars.example .dev.vars
 deno task build:web
 deno task db:migrate:worker
 deno task dev:worker
 ```
 
-浏览器打开 `http://localhost:8787`。`.dev.vars` 只用于本地开发，线上 secret 由
-Wrangler 管理。
-
-## 配置
+## 环境变量
 
 | 变量                     | 用途与默认值                                                         |
 | ------------------------ | -------------------------------------------------------------------- |
@@ -132,32 +87,9 @@ Wrangler 管理。
 认证。`GET /health` 可直接用于存活检查。
 主密钥丢失后，数据库中的渠道凭据将无法解密；备份时应同时保存数据库和主密钥。
 
-## 使用管理界面
-
-页面通过 i18next / react-i18next 提供简体中文和英文，默认按浏览器语言偏好选择，
-其他语言回退英文。可在页面顶部、“更新数据”左侧的页面语言图标或登录页切换语言，选择立即生效并保存在
-当前浏览器；选择“跟随浏览器”恢复自动检测。日期格式随页面语言变化。
-翻译资源位于 `apps/web/src/locales/`，新增文案应同步维护两种语言的词条与插值参数。
-订阅内容和外部服务的诊断信息保留原文。
-
-1. 在“通知渠道”中添加 Server酱³ SendKey 或 Telegram Bot Token 与 Chat ID，
-   按需设置解析模式和链接预览。渠道测试会发送已关联文章中最新的一篇；尚无文章时发送固定测试消息。
-2. 在“订阅源”中填写 RSS / Atom 地址、抓取周期，并选择一个或多个通知渠道。
-   网页中的抓取周期填写整数分钟；API 的 `intervalSeconds` 字段以秒计。
-   既有非整分钟配置会按约数显示，编辑其他字段时保留原周期。
-   名称可以留空，下一次成功抓取会使用 RSS / Atom 的标题。首次抓取保存全部文章，
-   只推送最新的一篇新增文章；定时抓取推送全部新增文章。
-3. 在订阅源详情查看文章和最近错误；需要立即抓取时点击“刷新”，本次仅推送最新的一篇新增文章。编辑地址会保留已有文章、投递记录和渠道关联。
-4. 在“投递记录”查看文章、订阅源、通知渠道、结果和失败原因；未命名订阅源显示地址。自动重试每轮最多尝试 5
-   次；发送结果未知时，先核对接收端，再手动重试。
-
-“概览”显示订阅源、今日文章、今日成功投递和失败情况。“设置”可按分钟调整新订阅源的默认抓取周期。文章和投递记录随关联资源保留；已完成及失败任务保留
-30 天。
-
 ## 备份与恢复
 
-SQLite 运行中可使用 `VACUUM INTO` 生成一致性快照，脚本会检查快照完整性。Deno
-自托管在仓库根目录运行：
+SQLite 运行中可使用 `VACUUM INTO` 生成一致性快照，脚本会检查快照完整性。在项目根目录运行：
 
 ```sh
 umask 077
@@ -166,52 +98,3 @@ stamp=$(date -u +%Y%m%dT%H%M%SZ)
 deno task db:backup "backups/pushrss-$stamp.db"
 cp .env "backups/pushrss-$stamp.env"
 ```
-
-Docker 自托管在容器内生成快照，再复制到宿主机：
-
-```sh
-umask 077
-mkdir -p backups
-stamp=$(date -u +%Y%m%dT%H%M%SZ)
-docker compose exec -T pushrss deno run -A scripts/backup.ts "/data/pushrss-$stamp.db"
-docker compose cp "pushrss:/data/pushrss-$stamp.db" "backups/pushrss-$stamp.db"
-cp .env "backups/pushrss-$stamp.env"
-```
-
-将数据库快照与对应 `.env`
-一起存放在受保护的备份位置。恢复时先停止服务，使用快照替换数据库文件，清理旧的
-WAL / SHM 文件，然后用对应的主密钥启动。Docker
-的恢复命令如下，将“日期”替换为备份文件名中的实际时间戳：
-
-```sh
-docker compose stop pushrss
-docker compose run --rm --no-deps -v "$PWD/backups/pushrss-日期.db:/restore.db:ro" \
-  --entrypoint /bin/deno pushrss eval \
-  'Deno.copyFileSync("/restore.db", "/data/pushrss.db"); for (const suffix of ["-wal", "-shm"]) { try { Deno.removeSync("/data/pushrss.db" + suffix); } catch (e) { if (!(e instanceof Deno.errors.NotFound)) throw e; } }'
-cp "backups/pushrss-日期.env" .env
-docker compose up -d
-```
-
-Deno 直接部署遵循相同步骤：停止 Deno 进程，将快照复制到
-`DATABASE_PATH`，清理同名的 `-wal` 和 `-shm` 文件，恢复对应
-`.env`，再启动服务。恢复后通过 `/health`
-和管理界面检查订阅源、渠道及投递记录；结果未知的投递应在核对接收端后手动重试。
-
-
-仓库使用 Deno workspace。`apps/web` 是 React 管理界面，`apps/server` 是共享 Hono
-API；`packages/core` 实现抓取和通知流程，`packages/db` 保存共享 schema 与迁移，
-`packages/notifier` 实现渠道协议，`packages/platform` 提供 Deno 与 Cloudflare
-适配。
-
-```sh
-deno task verify
-deno task test:platform
-deno run -A npm:@playwright/test install chromium
-deno task test:web
-```
-
-`verify` 包含格式、lint、类型检查、自动测试、前端构建和 Worker dry-run。
-`test:platform` 使用固定 RSS / Atom 样例和模拟通知服务，验证 Deno SQLite 与本地
-Workers D1 / Queues / Cron 链路，并检查 SQLite 快照恢复。`test:web` 使用本地
-Chromium 验证中文界面。直接构建可使用 `deno task build:web` 和
-`deno task build:worker`。
