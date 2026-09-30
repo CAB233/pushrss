@@ -83,6 +83,6 @@ jobs:
             http://127.0.0.1:18000/health
           curl --fail --silent --show-error http://127.0.0.1:18000/ | grep 'id="root"'
           curl --fail --silent --show-error --user admin:ci-test \
-            http://127.0.0.1:18000/api/settings
+            http://127.0.0.1:18000/api/stats
           docker exec pushrss-ci /bin/deno run -A scripts/backup.ts /data/ci-backup.db
           docker image inspect pushrss:ci --format '镜像体积：{{.Size}} bytes'
