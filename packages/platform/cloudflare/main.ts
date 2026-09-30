@@ -25,8 +25,14 @@ export function createWorker(options: RuntimeOptions = {}): WorkerHandler {
       }
       return runtime.app.fetch(request);
     },
-    async scheduled(_event: unknown, env: WorkerEnv) {
-      await (await createCloudflareRuntime(env, options)).scheduled();
+    async scheduled(event: unknown, env: WorkerEnv) {
+      const scheduledAt = typeof event === "object" && event !== null &&
+          "scheduledTime" in event && typeof event.scheduledTime === "number"
+        ? event.scheduledTime
+        : undefined;
+      await (await createCloudflareRuntime(env, options)).scheduled(
+        scheduledAt,
+      );
     },
     async queue(batch: QueueBatch, env: WorkerEnv) {
       try {

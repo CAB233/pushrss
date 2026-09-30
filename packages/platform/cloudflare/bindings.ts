@@ -38,4 +38,6 @@ export interface WorkerEnv {
   PUSHRSS_MASTER_KEY?: string;
   PUSHRSS_ADMIN_PASSWORD?: string;
   PUSHRSS_ADMIN_TOKEN?: string;
+  PUSHRSS_FETCH_INTERVAL_MINUTES?: string;
+  PUSHRSS_CHECK_INTERVAL_MINUTES?: string;
 }

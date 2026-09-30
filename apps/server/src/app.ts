@@ -7,6 +7,7 @@ import type { NotificationServices } from "../../../packages/core/notifications.
 import { ApiError } from "./validation.ts";
 export interface ApiServices extends NotificationServices {
   fetch?: typeof globalThis.fetch;
+  fetchIntervalSeconds?: number;
   adminPassword: string;
   sessionSecret: string;
 }

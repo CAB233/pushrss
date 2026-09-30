@@ -6,14 +6,24 @@ import { openDatabase } from "./sqlite.ts";
 import { migrate } from "./migrate.ts";
 import { createQueue } from "./queue.ts";
 import { runScheduler } from "./scheduler.ts";
+import {
+  readSchedulingConfig,
+  type SchedulingConfig,
+} from "../../shared/scheduling.ts";
 export async function createRuntime(
-  config: { databasePath: string; masterKey: string; adminPassword: string },
+  config: {
+    databasePath: string;
+    masterKey: string;
+    adminPassword: string;
+    scheduling?: SchedulingConfig;
+  },
   options: { fetch?: typeof globalThis.fetch } = {},
 ) {
   if (!config.adminPassword.trim()) {
     throw new Error("请设置非空的 PUSHRSS_ADMIN_PASSWORD");
   }
   const secrets = await createSecretStore(config.masterKey);
+  const scheduling = config.scheduling ?? readSchedulingConfig({});
   const db = openDatabase(config.databasePath);
   try {
     const directory = new URL("../../db/migrations/", import.meta.url);
@@ -36,6 +46,7 @@ export async function createRuntime(
       secrets,
       queue,
       fetch: options.fetch,
+      fetchIntervalSeconds: scheduling.fetchIntervalSeconds,
       adminPassword: config.adminPassword,
       sessionSecret: sessionSigningSecret(
         config.masterKey,
@@ -43,9 +54,16 @@ export async function createRuntime(
       ),
     });
     const controller = new AbortController();
+    let lastCheckedAt = -Infinity;
     const background = runScheduler(
       async () => {
-        queue.recover();
+        const at = Date.now();
+        const scanFeeds = at - lastCheckedAt >= scheduling.checkIntervalMs;
+        queue.recover({
+          scanFeeds,
+          fetchIntervalSeconds: scheduling.fetchIntervalSeconds,
+        });
+        if (scanFeeds) lastCheckedAt = at;
         for (
           let i = 0;
           i < 20 && !controller.signal.aborted;

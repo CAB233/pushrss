@@ -16,6 +16,8 @@ services:
     environment:
       PUSHRSS_MASTER_KEY: <run `openssl rand -base64 32`>
       PUSHRSS_ADMIN_PASSWORD: <any string>
+      PUSHRSS_FETCH_INTERVAL_MINUTES: 30
+      PUSHRSS_CHECK_INTERVAL_MINUTES: 1
       DATABASE_PATH: /data/pushrss.db
       HOST: 0.0.0.0
       PORT: "8000"
@@ -104,6 +106,8 @@ deno task dev:worker
 | ------------------------ | -------------------------------------------------------------------- |
 | `PUSHRSS_MASTER_KEY`     | 32 字节随机密钥的标准 Base64 编码；用于加密渠道凭据                  |
 | `PUSHRSS_ADMIN_PASSWORD` | 自行设置的非空管理密码                                               |
+| `PUSHRSS_FETCH_INTERVAL_MINUTES` | 订阅源拉取间隔，默认 `30` 分钟；显式设置后同步已有订阅源的周期 |
+| `PUSHRSS_CHECK_INTERVAL_MINUTES` | 订阅源检查间隔，默认 `1` 分钟 |
 | `DATABASE_PATH`          | Deno SQLite 路径，默认 `./pushrss.db`；容器固定为 `/data/pushrss.db` |
 | `HOST`                   | Deno 监听地址，默认 `127.0.0.1`；容器固定为 `0.0.0.0`                |
 | `PORT`                   | Deno 监听端口，默认 `8000`                                           |

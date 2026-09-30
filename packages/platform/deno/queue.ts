@@ -5,6 +5,7 @@ import type { Job, JobQueue } from "../../shared/contracts.ts";
 import type { NotificationServices } from "../../core/notifications.ts";
 import { handleJob } from "../../core/jobs.ts";
 import type { FetchOptions } from "../../core/fetch-feed.ts";
+import type { FeedScanOptions } from "../../shared/scheduling.ts";
 export interface ClaimedJob {
   id: string;
   token: string;
@@ -56,7 +57,7 @@ export function createQueue(
       ).get(claim.id, claim.token, now())
     ) throw new Error("任务租约已失效");
   }
-  function recover() {
+  function recover(options: FeedScanOptions = {}) {
     transaction(() => {
       const expired = client.prepare(
         "SELECT id,payload FROM jobs WHERE status='running' AND locked_until<=?",
@@ -105,11 +106,23 @@ export function createQueue(
           Number(d.next_attempt_at ?? now()),
         );
       }
-      const due = client.prepare(
-        `SELECT f.id FROM feeds f WHERE f.enabled=1 AND f.next_fetch_at<=? AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.type='fetch_feed' AND json_extract(j.payload,'$.feedId')=f.id AND j.status IN ('pending','running')) ORDER BY f.next_fetch_at LIMIT 100`,
-      ).all(now());
-      for (const f of due) {
-        insert({ type: "fetch_feed", feedId: String(f.id) }, now());
+      if (options.scanFeeds !== false) {
+        if (options.fetchIntervalSeconds !== undefined) {
+          // 保留上次尝试的时间基点，按新周期重新计算到期时间。
+          client.prepare(
+            "UPDATE feeds SET next_fetch_at=next_fetch_at+(?-interval_seconds)*1000,interval_seconds=? WHERE interval_seconds<>?",
+          ).run(
+            options.fetchIntervalSeconds,
+            options.fetchIntervalSeconds,
+            options.fetchIntervalSeconds,
+          );
+        }
+        const due = client.prepare(
+          `SELECT f.id FROM feeds f WHERE f.enabled=1 AND f.next_fetch_at<=? AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.type='fetch_feed' AND json_extract(j.payload,'$.feedId')=f.id AND j.status IN ('pending','running')) ORDER BY f.next_fetch_at LIMIT 100`,
+        ).all(now());
+        for (const f of due) {
+          insert({ type: "fetch_feed", feedId: String(f.id) }, now());
+        }
       }
       client.prepare(
         "DELETE FROM jobs WHERE status IN ('completed','failed') AND updated_at<?",

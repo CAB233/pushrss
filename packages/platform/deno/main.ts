@@ -1,6 +1,7 @@
 import { createApp } from "../../../apps/server/src/app.ts";
 import { createRuntime } from "./runtime.ts";
 import { createAssetHandler } from "./assets.ts";
+import { readSchedulingConfig } from "../../shared/scheduling.ts";
 export async function runServer(
   options: { fetch?: typeof globalThis.fetch } = {},
 ) {
@@ -12,6 +13,14 @@ export async function runServer(
       adminPassword: token,
       masterKey: key,
       databasePath: Deno.env.get("DATABASE_PATH") ?? "pushrss.db",
+      scheduling: readSchedulingConfig({
+        PUSHRSS_FETCH_INTERVAL_MINUTES: Deno.env.get(
+          "PUSHRSS_FETCH_INTERVAL_MINUTES",
+        ),
+        PUSHRSS_CHECK_INTERVAL_MINUTES: Deno.env.get(
+          "PUSHRSS_CHECK_INTERVAL_MINUTES",
+        ),
+      }),
     }, options)
     : undefined;
   const app = runtime?.app ?? createApp("deno");

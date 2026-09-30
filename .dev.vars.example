@@ -2,3 +2,7 @@
 # 使用 openssl rand -base64 32 生成一次主密钥，后续启动保留相同值。
 PUSHRSS_MASTER_KEY=
 PUSHRSS_ADMIN_PASSWORD=
+
+# 本地调度沿用 wrangler 的 Cron；线上在 wrangler.jsonc 的 vars 中配置
+PUSHRSS_FETCH_INTERVAL_MINUTES=30
+PUSHRSS_CHECK_INTERVAL_MINUTES=1

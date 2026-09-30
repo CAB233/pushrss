@@ -1,6 +1,7 @@
 import type { Job, JobQueue } from "../../shared/contracts.ts";
 import type { NotificationServices } from "../../core/notifications.ts";
 import type { FetchOptions } from "../../core/fetch-feed.ts";
+import type { FeedScanOptions } from "../../shared/scheduling.ts";
 import { handleJob } from "../../core/jobs.ts";
 import type {
   D1Binding,
@@ -72,7 +73,7 @@ export function createCloudflareQueue(
       });
     }
   }
-  async function recover() {
+  async function recover(options: FeedScanOptions = {}) {
     // 50 个 item ID 加时间参数保持在 D1 单语句参数限额内。
     const markers = await stmt(
       "SELECT item_id FROM notification_outbox ORDER BY item_id LIMIT 50",
@@ -115,17 +116,27 @@ export function createCloudflareQueue(
         now(),
       ),
       stmt(
+        "DELETE FROM jobs WHERE status IN ('completed','failed') AND updated_at<?",
+        now() - 30 * 86400000,
+      ),
+    );
+    if (options.scanFeeds !== false) {
+      if (options.fetchIntervalSeconds !== undefined) {
+        statements.push(stmt(
+          "UPDATE feeds SET next_fetch_at=next_fetch_at+(?-interval_seconds)*1000,interval_seconds=? WHERE interval_seconds<>?",
+          options.fetchIntervalSeconds,
+          options.fetchIntervalSeconds,
+          options.fetchIntervalSeconds,
+        ));
+      }
+      statements.push(stmt(
         "INSERT OR IGNORE INTO jobs(id,type,payload,available_at,created_at,updated_at) SELECT lower(hex(randomblob(16))),'fetch_feed',json_object('type','fetch_feed','feedId',f.id),?,?,? FROM feeds f WHERE f.enabled=1 AND f.next_fetch_at<=? AND NOT EXISTS(SELECT 1 FROM jobs j WHERE j.type='fetch_feed' AND json_extract(j.payload,'$.feedId')=f.id AND j.status IN ('pending','running')) ORDER BY f.next_fetch_at,f.id LIMIT 100",
         now(),
         now(),
         now(),
         now(),
-      ),
-      stmt(
-        "DELETE FROM jobs WHERE status IN ('completed','failed') AND updated_at<?",
-        now() - 30 * 86400000,
-      ),
-    );
+      ));
+    }
     await db.batch(statements);
   }
   async function publish() {

@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { ApiServices } from "./app.ts";
+import { DEFAULT_FETCH_INTERVAL_SECONDS } from "../../../packages/shared/scheduling.ts";
 import {
   ApiError,
   body,
@@ -105,6 +106,8 @@ function channelConfig(
 export function createResourceApp(services: ApiServices) {
   const app = new Hono();
   const r = services.repositories, now = services.now ?? Date.now;
+  const fetchIntervalSeconds = services.fetchIntervalSeconds ??
+    DEFAULT_FETCH_INTERVAL_SECONDS;
   async function publicFeed(feed: Feed, details?: FeedDetails) {
     const [bindings, items, count] = details
       ? [
@@ -292,8 +295,8 @@ export function createResourceApp(services: ApiServices) {
       keywords: keywords(b.keywords ?? []),
 
       enabled: false,
-      intervalSeconds: 1800,
-      nextFetchAt: time + 1800000,
+      intervalSeconds: fetchIntervalSeconds,
+      nextFetchAt: time + fetchIntervalSeconds * 1000,
       createdAt: time,
       updatedAt: time,
     });
