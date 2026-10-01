@@ -88,9 +88,6 @@ export function RoutingMatrix() {
 
   return (
     <section aria-labelledby="matrix-heading" className="flex flex-col gap-3">
-      <h2 id="matrix-heading" className="text-sm text-muted-foreground">
-        行是订阅源，列是推送渠道。勾选交叉格即建立一条推送路线，点击列头可整列开关。
-      </h2>
       <div className="overflow-x-auto rounded-lg border border-border bg-card">
         <table className="w-full border-collapse text-sm">
           <thead>
