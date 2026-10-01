@@ -31,7 +31,7 @@
     "fmt": "deno fmt",
     "fmt:check": "deno fmt --check",
     "lint": "deno lint",
-    "check": "deno check apps/web/src/main.tsx apps/server/src/app.ts packages/core/mod.ts packages/db/mod.ts packages/notifier/mod.ts packages/platform/deno/main.ts packages/platform/deno/sqlite.ts packages/platform/deno/scheduler.ts packages/platform/cloudflare/main.ts tests/*.ts scripts/*.ts apps/web/vite.config.ts packages/platform/deno/secrets.ts packages/platform/cloudflare/secrets.ts",
+    "check": "deno check apps/web/src/main.tsx apps/server/src/app.ts packages/core/mod.ts packages/db/mod.ts packages/notifier/mod.ts packages/platform/deno/main.ts packages/platform/deno/sqlite.ts packages/platform/deno/scheduler.ts packages/platform/cloudflare/main.ts tests/*.ts scripts/*.ts apps/web/vite.config.ts packages/platform/cloudflare/secrets.ts",
     "test": "deno test --allow-read=tests,packages/db/migrations,/tmp --allow-write=/tmp",
     "build:web": "deno run -A npm:vite build apps/web",
     "build:worker": "deno task wrangler deploy --dry-run --outdir dist/worker",

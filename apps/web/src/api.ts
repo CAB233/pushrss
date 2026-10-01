@@ -67,32 +67,6 @@ export async function createSession(
     );
   }
 }
-export async function deleteSession(
-  request: typeof fetch = fetch,
-): Promise<void> {
-  let response: Response;
-  try {
-    response = await request("/api/session", {
-      method: "DELETE",
-      credentials: "same-origin",
-    });
-  } catch {
-    throw new Error(i18n.t("error.network"));
-  }
-  if (!response.ok) {
-    const data = await response.json().catch(() => null);
-    throw new ApiError(
-      response.status,
-      apiErrorMessage(data, response.status),
-    );
-  }
-}
-export type Api = ReturnType<typeof createApi>;
-export interface Page<T> {
-  items: T[];
-  limit: number;
-  offset: number;
-}
 export function safeLink(value: string | null): string | undefined {
   try {
     const url = new URL(value ?? "");

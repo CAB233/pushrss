@@ -241,13 +241,12 @@ export function createResourceApp(services: ApiServices) {
     try {
       const response = await fetchPublicFeed(url, {
         signal: abort.signal,
-        redirect: "manual",
         headers: {
           Accept:
             "application/rss+xml, application/atom+xml, application/xml, text/xml",
         },
       }, services.fetch);
-      if (!response.ok || response.status >= 300) {
+      if (!response.ok) {
         await response.body?.cancel();
         throw new ApiError(
           422,

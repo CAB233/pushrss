@@ -82,10 +82,6 @@ export async function fetchFeed(
   let etag: string | null = feed.etag;
   let lastModified: string | null = feed.lastModified;
   try {
-    const u = new URL(publicUrl(feed.url));
-    if (!["http:", "https:"].includes(u.protocol)) {
-      throw new FeedError("Feed URL 协议无效");
-    }
     const headers = new Headers({
       Accept:
         "application/atom+xml, application/rss+xml, application/xml, text/xml",
@@ -97,7 +93,7 @@ export async function fetchFeed(
       }
     }
     const request = options.fetch ?? globalThis.fetch;
-    const response = await fetchPublicFeed(u.href, {
+    const response = await fetchPublicFeed(feed.url, {
       headers,
       signal: controller.signal,
     }, request);

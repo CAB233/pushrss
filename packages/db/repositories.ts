@@ -116,7 +116,6 @@ export interface Repositories {
     ): Promise<{ deliveredCount: number; lastDeliveryAt: number | null }>;
     save(value: typeof s.notificationChannels.$inferInsert): Promise<Channel>;
     get(id: string): Promise<Channel | undefined>;
-    list(limit?: number, offset?: number): Promise<Channel[]>;
     remove(id: string): Promise<void>;
   };
   subscriptions: {
@@ -442,12 +441,6 @@ export function createRepositories(db: SqliteRemoteDatabase): Repositories {
         return (await db.select().from(s.notificationChannels).where(
           eq(s.notificationChannels.id, id),
         ).limit(1))[0];
-      },
-      async list(limit, offset) {
-        const p = page(limit, offset);
-        return await db.select().from(s.notificationChannels).orderBy(
-          asc(s.notificationChannels.id),
-        ).limit(p.limit).offset(p.offset);
       },
       async remove(id) {
         await db.delete(s.notificationChannels).where(

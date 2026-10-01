@@ -4,7 +4,6 @@ import zhCN from "./locales/zh-CN.json" with { type: "json" };
 
 export type LanguagePreference = "system" | "zh-CN" | "en";
 const storageKey = "pushrss.language";
-const listeners = new Set<() => void>();
 export function parseLanguagePreference(
   value: string | null,
 ): LanguagePreference {
@@ -26,9 +25,6 @@ function readPreference(): LanguagePreference {
   }
 }
 let preference = readPreference();
-export function getLanguagePreference(): LanguagePreference {
-  return preference;
-}
 function currentLanguage(): "zh-CN" | "en" {
   return preference === "system"
     ? resolveLanguage(
@@ -54,25 +50,9 @@ function updateDocumentLanguage() {
 }
 i18n.on("languageChanged", updateDocumentLanguage);
 updateDocumentLanguage();
-export function subscribeLanguagePreference(listener: () => void): () => void {
-  listeners.add(listener);
-  return () => {
-    listeners.delete(listener);
-  };
-}
 function applyPreference(value: LanguagePreference) {
   preference = value;
   void i18n.changeLanguage(currentLanguage());
-  for (const listener of listeners) listener();
-}
-export function setLanguagePreference(value: LanguagePreference): void {
-  try {
-    if (value === "system") localStorage.removeItem(storageKey);
-    else localStorage.setItem(storageKey, value);
-  } catch {
-    // Storage can be disabled; the selection still applies for this session.
-  }
-  applyPreference(value);
 }
 if (typeof document !== "undefined") {
   globalThis.addEventListener("languagechange", () => {

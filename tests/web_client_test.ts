@@ -2,7 +2,6 @@ import {
   ApiError,
   createApi,
   createSession,
-  deleteSession,
   safeLink,
 } from "../apps/web/src/api.ts";
 Deno.test("管理客户端认证、错误、无内容响应及安全链接", async () => {
@@ -54,11 +53,10 @@ Deno.test("管理客户端认证、错误、无内容响应及安全链接", asy
   }) as typeof fetch;
   await createSession("中文密码", sessionRequest);
   await createApi(undefined, () => {}, sessionRequest)("/status");
-  await deleteSession(sessionRequest);
   if (
     calls[0] !== "POST:Basic YWRtaW46" +
         btoa(String.fromCharCode(...new TextEncoder().encode("中文密码"))) ||
-    calls[1] !== "GET:cookie" || calls[2] !== "DELETE:cookie"
+    calls[1] !== "GET:cookie"
   ) throw new Error("会话请求认证方式错误");
   for (
     const value of [

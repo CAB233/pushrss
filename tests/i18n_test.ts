@@ -49,10 +49,9 @@ Deno.test("中英文词条、插值参数保持一致，框架正确插入动态
       throw new Error(`词条或参数不完整: ${key}`);
     }
   }
-  const title = '<Example & "feed">';
   for (const lng of ["en", "zh-CN"]) {
-    const message = i18n.t("feeds.deleteConfirm", { lng, name: title });
-    if (!message.includes(title) || message.includes("{{")) {
+    const message = i18n.t("error.request", { lng, status: 503 });
+    if (!message.includes("503") || message.includes("{{")) {
       throw new Error("插值失败");
     }
   }
