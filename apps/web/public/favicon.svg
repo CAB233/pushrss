@@ -1,0 +1,30 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="24"
+  height="24">
+  <metadata>
+    <rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+      xmlns:dc="http://purl.org/dc/elements/1.1/">
+      <rdf:Description>
+        <dc:creator>RealFaviconGenerator</dc:creator>
+        <dc:source>https://realfavicongenerator.net</dc:source>
+      </rdf:Description>
+    </rdf:RDF>
+  </metadata>
+  <rect width="24" height="24" fill="#171717"></rect>
+  <g fill="none" stroke="#fafafa" stroke-width="2.25" stroke-linecap="round">
+    <path d="M5 11a8 8 0 0 1 8 8"></path>
+    <path d="M5 5a14 14 0 0 1 14 14"></path>
+    <circle cx="5.5" cy="18.5" r="1.5" fill="#fafafa" stroke="none"></circle>
+  </g>
+  <style>
+  @media (prefers-color-scheme: light) {
+    :root {
+      filter: none;
+    }
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      filter: invert(100%);
+    }
+  }
+  </style>
+</svg>

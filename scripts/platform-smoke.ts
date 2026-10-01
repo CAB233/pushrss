@@ -91,6 +91,14 @@ try {
       if (!fallback.ok || !(await fallback.text()).includes('id="root"')) {
         throw new Error("Deno 前端页面回退失败");
       }
+      const manifest = await fetch(url + "/site.webmanifest");
+      if (
+        !manifest.ok ||
+        manifest.headers.get("content-type") !==
+          "application/manifest+json; charset=utf-8"
+      ) {
+        throw new Error("Deno 前端清单类型失败");
+      }
       const response = await fetch(url + "/api/feeds", {
         method: "POST",
         headers,

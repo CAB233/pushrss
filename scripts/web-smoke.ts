@@ -42,6 +42,16 @@ const services: ApiServices = {
   }])),
 };
 const app = createApp("deno", services);
+const staticContentTypes: Record<string, string> = {
+  "/": "text/html",
+  "/favicon.svg": "image/svg+xml",
+  "/favicon.ico": "image/x-icon",
+  "/favicon-96x96.png": "image/png",
+  "/apple-touch-icon.png": "image/png",
+  "/web-app-manifest-192x192.png": "image/png",
+  "/web-app-manifest-512x512.png": "image/png",
+  "/site.webmanifest": "application/manifest+json",
+};
 const server = Deno.serve(
   { hostname: "127.0.0.1", port: 0, onListen() {} },
   async (request) => {
@@ -52,7 +62,7 @@ const server = Deno.serve(
       );
     }
     if (
-      path !== "/" && path !== "/pushrss-icon-v1.svg" &&
+      !(path in staticContentTypes) &&
       !/^\/assets\/[a-zA-Z0-9_.-]+$/.test(path)
     ) return new Response("Not found", { status: 404 });
     try {
@@ -65,13 +75,14 @@ const server = Deno.serve(
         ),
         {
           headers: {
-            "content-type": path.endsWith(".js")
-              ? "application/javascript"
-              : path.endsWith(".css")
-              ? "text/css"
-              : path.endsWith(".svg")
-              ? "image/svg+xml"
-              : "text/html",
+            "content-type": staticContentTypes[path] ??
+              (path.endsWith(".js")
+                ? "application/javascript"
+                : path.endsWith(".css")
+                ? "text/css"
+                : path.endsWith(".svg")
+                ? "image/svg+xml"
+                : "text/html"),
           },
         },
       );

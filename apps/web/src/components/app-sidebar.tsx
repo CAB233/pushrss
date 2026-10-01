@@ -52,7 +52,7 @@ export function AppSidebar({ page, onNavigate }: {
                 }}
               >
                 <img
-                  src="/pushrss-icon-v1.svg"
+                  src="/favicon.svg"
                   alt=""
                   className="size-4 shrink-0"
                 />
