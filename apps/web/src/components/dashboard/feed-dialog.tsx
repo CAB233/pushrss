@@ -14,6 +14,7 @@ import {
 } from "../ui/dialog.tsx";
 import { Input } from "../ui/input.tsx";
 import { Label } from "../ui/label.tsx";
+import { CategoryInput } from "./category-input.tsx";
 import {
   api,
   CHANNEL_META,
@@ -32,9 +33,15 @@ interface FeedDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   feed?: Feed | null;
+  categories: readonly string[];
 }
 
-export function FeedDialog({ open, onOpenChange, feed }: FeedDialogProps) {
+export function FeedDialog({
+  open,
+  onOpenChange,
+  feed,
+  categories,
+}: FeedDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
@@ -42,6 +49,7 @@ export function FeedDialog({ open, onOpenChange, feed }: FeedDialogProps) {
           <FeedForm
             key={feed?.id ?? "new"}
             feed={feed ?? null}
+            categories={categories}
             onDone={() => onOpenChange(false)}
           />
         )}
@@ -50,7 +58,11 @@ export function FeedDialog({ open, onOpenChange, feed }: FeedDialogProps) {
   );
 }
 
-function FeedForm({ feed, onDone }: { feed: Feed | null; onDone: () => void }) {
+function FeedForm({ feed, onDone, categories }: {
+  feed: Feed | null;
+  onDone: () => void;
+  categories: readonly string[];
+}) {
   const isEdit = Boolean(feed);
   const { data: channels = [] } = useChannels();
   const [url, setUrl] = useState(feed?.url ?? "");
@@ -194,11 +206,11 @@ function FeedForm({ feed, onDone }: { feed: Feed | null; onDone: () => void }) {
         </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor="feed-category">分类</Label>
-          <Input
+          <CategoryInput
             id="feed-category"
             value={category}
-            onChange={(e) => setCategory(e.target.value)}
-            placeholder="如：技术博客"
+            onChange={setCategory}
+            categories={categories}
           />
         </div>
       </div>

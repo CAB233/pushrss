@@ -157,6 +157,7 @@ export function FeedsPanel() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
         feed={editing}
+        categories={categories}
       />
     </section>
   );

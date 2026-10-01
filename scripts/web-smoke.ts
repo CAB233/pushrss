@@ -98,6 +98,19 @@ try {
     viewport: { width: 1360, height: 900 },
     locale: "zh-CN",
   });
+  const expectCategoryMenuAligned = async () => {
+    await expect.poll(async () => {
+      const field = await page.locator(
+        '[data-slot="input-group"]:has(#feed-category)',
+      ).boundingBox();
+      const menu = await page.getByRole("menu").boundingBox();
+      if (!field || !menu) return Infinity;
+      return Math.max(
+        Math.abs(menu.x - field.x),
+        Math.abs(menu.x + menu.width - field.x - field.width),
+      );
+    }, { message: "分类菜单两侧应与输入框对齐" }).toBeLessThan(1);
+  };
   page.on("pageerror", (error) => errors.push(error.message));
   page.on("dialog", (dialog) => dialog.accept());
   await page.goto(`http://127.0.0.1:${server.addr.port}`);
@@ -139,6 +152,9 @@ try {
   await page.getByRole("tab", { name: "订阅源" }).click();
   await page.getByRole("button", { name: "添加订阅源", exact: true }).click();
   const feedDialog = page.getByRole("dialog");
+  await expect(
+    feedDialog.getByRole("button", { name: "选择已有分类" }),
+  ).toBeDisabled();
   await feedDialog.getByLabel("订阅地址").fill("https://feed.example/rss");
   await feedDialog.getByRole("button", { name: "检测", exact: true }).click();
   await expect(feedDialog.getByLabel("名称", { exact: true })).toHaveValue(
@@ -168,6 +184,19 @@ try {
   await expect(feedDialog.getByLabel("订阅地址")).toBeDisabled();
   await expect(feedDialog.getByLabel("关键词过滤")).toHaveValue(
     "Deno，Workers",
+  );
+  await feedDialog.getByRole("button", { name: "选择已有分类" }).click();
+  await expect(page.getByRole("menuitemradio")).toHaveCount(1);
+  await expect(page.getByRole("menuitemradio", { name: "技术", exact: true }))
+    .toHaveAttribute("aria-checked", "true");
+  await page.screenshot({
+    path: "/tmp/pushrss-category-desktop.png",
+    animations: "disabled",
+  });
+  await expectCategoryMenuAligned();
+  await page.getByRole("menuitemradio", { name: "技术", exact: true }).click();
+  await expect(feedDialog.getByLabel("分类", { exact: true })).toHaveValue(
+    "技术",
   );
   await feedDialog.getByLabel("分类", { exact: true }).fill("开发");
   await feedDialog.getByRole("button", { name: "保存", exact: true }).click();
@@ -207,6 +236,54 @@ try {
   if (
     await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)
   ) throw new Error("手机页面横向溢出");
+
+  // 新增时复用已有分类，验证键盘选择、保存与多个订阅源共享分类时的去重。
+  await page.getByRole("button", { name: "添加订阅源", exact: true }).click();
+  await feedDialog.getByLabel("订阅地址").fill("https://feed.example/second");
+  await feedDialog.getByLabel("名称", { exact: true }).fill("分类选择测试");
+  const categoryTrigger = feedDialog.getByRole("button", {
+    name: "选择已有分类",
+  });
+  await categoryTrigger.focus();
+  await categoryTrigger.press("ArrowDown");
+  await expect(page.getByRole("menuitemradio", { name: "开发", exact: true }))
+    .toBeVisible();
+  await page.screenshot({
+    path: "/tmp/pushrss-category-mobile.png",
+    animations: "disabled",
+  });
+  await expectCategoryMenuAligned();
+  await page.setViewportSize({ width: 600, height: 844 });
+  await expectCategoryMenuAligned();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expectCategoryMenuAligned();
+  await page.keyboard.press("Home");
+  await page.keyboard.press("Enter");
+  await expect(feedDialog.getByLabel("分类", { exact: true })).toHaveValue(
+    "开发",
+  );
+  await expect(feedDialog).toBeVisible();
+  await feedDialog.getByRole("button", { name: "添加并抓取", exact: true })
+    .click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  const categoryFeed = page.getByRole("listitem").filter({
+    has: page.getByText("分类选择测试", { exact: true }),
+  });
+  await expect(categoryFeed).toBeVisible();
+  const stored = (await repositories.feeds.list()).find((feed) =>
+    feed.title === "分类选择测试"
+  );
+  if (stored?.category !== "开发") throw new Error("已有分类保存失败");
+  await categoryFeed.getByRole("button", { name: "编辑", exact: true }).click();
+  await feedDialog.getByRole("button", { name: "选择已有分类" }).click();
+  await expect(page.getByRole("menuitemradio")).toHaveCount(1);
+  await expect(page.getByRole("menuitemradio", { name: "开发", exact: true }))
+    .toHaveAttribute("aria-checked", "true");
+  await page.keyboard.press("Escape");
+  await expect(feedDialog).toBeVisible();
+  await feedDialog.getByRole("button", { name: "取消", exact: true }).click();
+  await categoryFeed.getByRole("button", { name: "删除", exact: true }).click();
+  await expect(categoryFeed).toHaveCount(0);
   await page.getByRole("button", { name: "删除", exact: true }).click();
   await expect(page.getByText("还没有订阅源")).toBeVisible();
   await page.getByRole("tab", { name: "推送渠道" }).click();
@@ -218,7 +295,7 @@ try {
   await expect(page.getByLabel("管理密码")).toBeVisible();
   if (errors.length) throw new Error(errors.join("\n"));
   console.log(
-    "rss 页面验收通过：登录、八种渠道选项、检测与分类关键词、基线、队列刷新、编辑、搜索、路由、移动端、删除",
+    "rss 页面验收通过：登录、八种渠道选项、检测与分类关键词、分类输入与下拉选择、基线、队列刷新、编辑、搜索、路由、移动端、删除",
   );
 } finally {
   await browser.close();
