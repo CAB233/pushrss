@@ -133,7 +133,7 @@ export async function verifyFeeds(
     });
     if (manual.status !== "updated") throw new Error("手动刷新失败");
     equal(manual.added.length, 2);
-    equal(manual.notificationItems.map((item) => item.title), ["较早", "最新"]);
+    equal(manual.notificationItems.map((item) => item.title), ["最新", "较早"]);
     equal((await repos.feeds.get(other))?.title, b.title);
     response = () =>
       new Response(
@@ -148,6 +148,45 @@ export async function verifyFeeds(
     equal(scheduled.notificationItems.map((item) => item.title), [
       "中间",
       "更早",
+    ]);
+    await repos.feeds.edit(other, { notificationLimit: 1, keywords: ["匹配"] });
+    response = () =>
+      new Response(
+        `<rss version="2.0"><channel><title>测试</title>
+      <item><guid>limited-old</guid><title>匹配较早</title><pubDate>Sun, 27 Sep 2026 00:00:00 GMT</pubDate></item>
+      <item><guid>limited-new</guid><title>匹配最新</title><pubDate>Mon, 28 Sep 2026 00:00:00 GMT</pubDate></item>
+      <item><guid>limited-new</guid><title>匹配重复</title><pubDate>Mon, 28 Sep 2026 00:00:00 GMT</pubDate></item>
+      <item><guid>limited-filtered</guid><title>过滤</title><pubDate>Tue, 29 Sep 2026 00:00:00 GMT</pubDate></item>
+      <item><guid>limited-undated</guid><title>匹配无时间</title></item>
+      </channel></rss>`,
+      );
+    const limited = await fetchFeed(repos, other, { fetch: mock, now });
+    if (limited.status !== "updated") throw new Error("限制推送失败");
+    equal(limited.added.length, 4);
+    equal(limited.notificationItems.map((item) => item.title), ["匹配最新"]);
+    equal(limited.added.filter((item) => item.notify).length, 1);
+    const limitedRepeat = await fetchFeed(repos, other, { fetch: mock, now });
+    if (limitedRepeat.status !== "updated") {
+      throw new Error("限制推送重复抓取失败");
+    }
+    equal(limitedRepeat.added.length, 0);
+    equal(limitedRepeat.notificationItems.length, 0);
+    await repos.feeds.edit(other, { notificationLimit: 2 });
+    response = () =>
+      new Response(
+        `<rss version="2.0"><channel><title>测试</title>
+      <item><guid>limited-new</guid><title>匹配已抓取</title><pubDate>Mon, 28 Sep 2026 00:00:00 GMT</pubDate></item>
+      <item><guid>undated-a</guid><title>匹配第一条</title></item>
+      <item><guid>undated-a</guid><title>匹配重复条目</title></item>
+      <item><guid>undated-b</guid><title>匹配第二条</title></item>
+      <item><guid>undated-c</guid><title>匹配第三条</title></item>
+      </channel></rss>`,
+      );
+    const undated = await fetchFeed(repos, other, { fetch: mock, now });
+    if (undated.status !== "updated") throw new Error("无时间文章抓取失败");
+    equal(undated.notificationItems.map((item) => item.title), [
+      "匹配第一条",
+      "匹配第二条",
     ]);
     equal(
       (await fetchFeed(repos, id, { fetch: mock, now, maxBytes: 10 })).status,

@@ -182,6 +182,12 @@ try {
   });
   await page.getByRole("button", { name: "编辑", exact: true }).click();
   await expect(feedDialog.getByLabel("订阅地址")).toBeDisabled();
+  await expect(feedDialog.getByLabel("推送数量上限")).toHaveValue("10");
+  await feedDialog.getByLabel("推送数量上限").fill("1");
+  await page.screenshot({
+    path: "/tmp/pushrss-feed-settings.png",
+    animations: "disabled",
+  });
   await expect(feedDialog.getByLabel("关键词过滤")).toHaveValue(
     "Deno，Workers",
   );
@@ -201,6 +207,12 @@ try {
   await feedDialog.getByLabel("分类", { exact: true }).fill("开发");
   await feedDialog.getByRole("button", { name: "保存", exact: true }).click();
   await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect.poll(async () =>
+    (await repositories.feeds.list())[0].notificationLimit
+  ).toBe(1);
+  await page.getByRole("button", { name: "编辑", exact: true }).click();
+  await expect(feedDialog.getByLabel("推送数量上限")).toHaveValue("1");
+  await feedDialog.getByRole("button", { name: "取消", exact: true }).click();
   await page.getByLabel("搜索订阅源").fill("no-match");
   await expect(page.getByText("没有匹配的订阅源")).toBeVisible();
   await page.getByLabel("搜索订阅源").fill("");

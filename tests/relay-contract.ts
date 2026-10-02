@@ -86,6 +86,7 @@ export async function verifyRelay(repositories: Repositories) {
       keywords: ["Deno"],
       channelIds: channels,
     });
+    equal(feed.notificationLimit, 10);
     equal(feed.title, "样例源");
     equal(feed.category, "技术");
     equal(feed.status, "ok");
@@ -121,6 +122,7 @@ export async function verifyRelay(repositories: Repositories) {
     const refresh = await api(`/feeds/${feed.id}/refresh`, "POST");
     equal(refresh.accepted, true);
     await api(`/feeds/${feed.id}`, "PATCH", {
+      notificationLimit: 1,
       category: "阅读",
       keywords: [],
       channelIds: [channels[0]],
@@ -128,7 +130,26 @@ export async function verifyRelay(repositories: Repositories) {
     const changed = (await api("/feeds")).find((f: { id: string }) =>
       f.id === feed.id
     );
+    equal(changed.notificationLimit, 1);
     equal(changed.category, "阅读");
+    for (const notificationLimit of [0, -1, 11, 1.5, "1", null]) {
+      equal(
+        (await app.request(`/api/feeds/${feed.id}`, {
+          method: "PATCH",
+          headers: {
+            Authorization: "Bearer relay-test",
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ notificationLimit }),
+        })).status,
+        400,
+      );
+    }
+    equal(
+      (await api(`/feeds/${feed.id}`, "PATCH", { title: "样例源" }))
+        .notificationLimit,
+      1,
+    );
     equal(changed.channelIds, [channels[0]]);
     equal(changed.latestItems.length, 5);
     await api(`/feeds/${feed.id}`, "PATCH", { enabled: false });

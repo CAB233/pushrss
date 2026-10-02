@@ -21,6 +21,7 @@ export const feeds = sqliteTable(
     category: text("category").notNull().default("未分类"),
     keywords: text("keywords", { mode: "json" }).$type<string[]>().notNull()
       .default([]),
+    notificationLimit: integer("notification_limit").notNull().default(10),
     siteUrl: text("site_url").notNull().default(""),
     enabled: integer("enabled", { mode: "boolean" }).notNull().default(true),
     intervalSeconds: integer("interval_seconds").notNull().default(1800),
@@ -38,6 +39,10 @@ export const feeds = sqliteTable(
   ) => [
     uniqueIndex("feeds_url_unique").on(t.url),
     index("feeds_due").on(t.enabled, t.nextFetchAt),
+    check(
+      "feeds_notification_limit_valid",
+      sql`${t.notificationLimit} BETWEEN 1 AND 10`,
+    ),
     check("feeds_interval_positive", sql`${t.intervalSeconds} > 0`),
     check("feeds_failures_valid", sql`${t.failureCount} >= 0`),
     check("feeds_enabled_valid", sql`${t.enabled} IN (0,1)`),

@@ -61,6 +61,15 @@ function keywords(value: unknown): string[] {
   ) invalid();
   return [...new Set((value as string[]).map((v) => v.trim()).filter(Boolean))];
 }
+function notificationLimit(value: unknown): number {
+  if (
+    typeof value !== "number" || !Number.isInteger(value) || value < 1 ||
+    value > 10
+  ) {
+    throw new ApiError(400, "INVALID_INPUT", "推送数量上限须为 1–10 的整数");
+  }
+  return value;
+}
 function title(value: unknown) {
   return typeof value === "string" && value.length <= 500
     ? value.trim()
@@ -128,6 +137,7 @@ export function createResourceApp(services: ApiServices) {
       category: feed.category,
       enabled: feed.enabled,
       keywords: feed.keywords,
+      notificationLimit: feed.notificationLimit,
       channelIds: bindings.map((b) => b.channelId),
       status: feed.lastError
         ? "error"
@@ -283,6 +293,7 @@ export function createResourceApp(services: ApiServices) {
       "title",
       "category",
       "keywords",
+      "notificationLimit",
       "channelIds",
     ]);
     const ids = await validChannels(b.channelIds ?? []), time = now();
@@ -292,6 +303,9 @@ export function createResourceApp(services: ApiServices) {
       title: title(b.title ?? ""),
       category: title(b.category ?? "") || "未分类",
       keywords: keywords(b.keywords ?? []),
+      notificationLimit: b.notificationLimit === undefined
+        ? 10
+        : notificationLimit(b.notificationLimit),
 
       enabled: false,
       intervalSeconds: fetchIntervalSeconds,
@@ -315,6 +329,7 @@ export function createResourceApp(services: ApiServices) {
       "title",
       "category",
       "keywords",
+      "notificationLimit",
       "channelIds",
       "enabled",
     ]);
@@ -324,6 +339,9 @@ export function createResourceApp(services: ApiServices) {
         ? old.category
         : title(b.category) || "未分类",
       keywords: b.keywords === undefined ? old.keywords : keywords(b.keywords),
+      notificationLimit: b.notificationLimit === undefined
+        ? old.notificationLimit
+        : notificationLimit(b.notificationLimit),
       enabled: b.enabled === undefined ? old.enabled : boolean(b.enabled),
 
       updatedAt: now(),

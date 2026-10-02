@@ -27,9 +27,20 @@ Deno.test("新数据库使用统一的七张业务表与复合订阅主键", asy
     equal(migrations.map((m) => m.name), [
       "0001_schema.sql",
       "0002_delivery_logs.sql",
+      "0003_feed_notification_limit.sql",
     ]);
+    migrate(database.client, migrations.slice(0, 2));
+    database.client.prepare(
+      "INSERT INTO feeds (id,url,title,next_fetch_at,created_at,updated_at) VALUES ('upgrade','https://upgrade.example/feed','升级测试',0,0,0)",
+    ).run();
     migrate(database.client, migrations);
     migrate(database.client, migrations);
+    equal(
+      database.client.prepare(
+        "SELECT notification_limit FROM feeds WHERE id='upgrade'",
+      ).get()?.notification_limit,
+      10,
+    );
     const names = database.client.prepare(
       "SELECT name FROM sqlite_master WHERE type='table' AND name <> 'pushrss_migrations' ORDER BY name",
     ).all().map((r) => r.name);

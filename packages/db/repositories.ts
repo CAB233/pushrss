@@ -61,6 +61,7 @@ export interface Repositories {
           Feed,
           | "category"
           | "keywords"
+          | "notificationLimit"
           | "url"
           | "title"
           | "enabled"

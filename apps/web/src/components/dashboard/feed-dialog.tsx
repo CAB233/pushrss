@@ -44,7 +44,7 @@ export function FeedDialog({
 }: FeedDialogProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-lg">
         {open && (
           <FeedForm
             key={feed?.id ?? "new"}
@@ -69,6 +69,9 @@ function FeedForm({ feed, onDone, categories }: {
   const [title, setTitle] = useState(feed?.title ?? "");
   const [category, setCategory] = useState(feed?.category ?? "");
   const [keywords, setKeywords] = useState(feed?.keywords.join("，") ?? "");
+  const [notificationLimit, setNotificationLimit] = useState(
+    String(feed?.notificationLimit ?? 10),
+  );
   const [channelIds, setChannelIds] = useState<string[]>(
     feed?.channelIds ?? [],
   );
@@ -105,6 +108,7 @@ function FeedForm({ feed, onDone, categories }: {
       category,
       keywords: parseKeywords(keywords),
       channelIds,
+      ...(isEdit ? { notificationLimit: Number(notificationLimit) } : {}),
     };
     try {
       if (feed) {
@@ -260,6 +264,22 @@ function FeedForm({ feed, onDone, categories }: {
             </div>
           )}
       </fieldset>
+
+      {isEdit && (
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="feed-notification-limit">推送数量上限</Label>
+          <Input
+            id="feed-notification-limit"
+            type="number"
+            min={1}
+            max={10}
+            step={1}
+            required
+            value={notificationLimit}
+            onChange={(e) => setNotificationLimit(e.target.value)}
+          />
+        </div>
+      )}
 
       {error && (
         <p role="alert" className="text-sm text-destructive">

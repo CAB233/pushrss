@@ -61,7 +61,7 @@ export async function fetchPublicFeed(
   }
   throw new FeedError("Feed 重定向次数超过限制");
 }
-/** 样例源首次建立基线，后续过滤并分发至多十条新增文章。 */
+/** 首次建立基线，后续按订阅源上限推送最新的匹配文章，其余文章保存去重。 */
 export async function fetchFeed(
   repos: Repositories,
   feedId: string,
@@ -137,7 +137,11 @@ export async function fetchFeed(
       const added: StoredItem[] = [];
       const notificationItems: StoredItem[] = [];
       const initial = feed.lastFetchedAt === null;
-      for (const item of parsed.items) {
+      // 按发布时间降序；缺少时间的文章排在有时间的文章之后，同时间保留源顺序。
+      const items = parsed.items.toSorted((a, b) =>
+        (b.publishedAt ?? -Infinity) - (a.publishedAt ?? -Infinity)
+      );
+      for (const item of items) {
         const matches = feed.keywords.length === 0 ||
           feed.keywords.some((keyword) =>
             `${item.title} ${
@@ -149,7 +153,8 @@ export async function fetchFeed(
             }`
               .toLocaleLowerCase().includes(keyword.toLocaleLowerCase())
           );
-        const notify = !initial && matches && notificationItems.length < 10;
+        const notify = !initial && matches &&
+          notificationItems.length < feed.notificationLimit;
         const saved = await repos.items.insert({
           ...item,
           id: crypto.randomUUID(),

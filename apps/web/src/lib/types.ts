@@ -26,6 +26,7 @@ export interface Feed {
   category: string;
   enabled: boolean;
   keywords: string[];
+  notificationLimit: number;
   channelIds: string[];
   status: FeedStatus;
   lastError: string | null;
